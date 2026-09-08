@@ -1,0 +1,12 @@
+{
+  "name": "@tuktak/config-tailwind",
+  "version": "1.0.0",
+  "private": true,
+  "main": "preset.ts",
+  "exports": {
+    ".": "./preset.ts"
+  },
+  "devDependencies": {
+    "tailwindcss": "^4.3.3"
+  }
+}

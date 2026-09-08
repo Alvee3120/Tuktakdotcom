@@ -1,0 +1,20 @@
+CREATE INDEX `address_user_idx` ON `address` (`user_id`);--> statement-breakpoint
+CREATE INDEX `inv_stock_product_idx` ON `inventory_stock` (`product_id`);--> statement-breakpoint
+CREATE INDEX `order_item_order_idx` ON `order_item` (`order_id`);--> statement-breakpoint
+CREATE INDEX `order_item_product_idx` ON `order_item` (`product_id`);--> statement-breakpoint
+CREATE INDEX `order_user_idx` ON `order` (`user_id`);--> statement-breakpoint
+CREATE INDEX `order_status_idx` ON `order` (`status`);--> statement-breakpoint
+CREATE INDEX `order_created_idx` ON `order` (`created_at`);--> statement-breakpoint
+CREATE INDEX `order_payment_status_idx` ON `order` (`payment_status`);--> statement-breakpoint
+CREATE INDEX `order_risk_idx` ON `order` (`risk_score`);--> statement-breakpoint
+CREATE INDEX `variant_product_idx` ON `product_variant` (`product_id`);--> statement-breakpoint
+CREATE INDEX `product_category_idx` ON `product` (`category_id`);--> statement-breakpoint
+CREATE INDEX `product_brand_idx` ON `product` (`brand_id`);--> statement-breakpoint
+CREATE INDEX `product_active_idx` ON `product` (`is_active`);--> statement-breakpoint
+CREATE INDEX `product_featured_idx` ON `product` (`is_featured`);--> statement-breakpoint
+CREATE INDEX `product_created_idx` ON `product` (`created_at`);--> statement-breakpoint
+CREATE INDEX `purchase_supplier_idx` ON `purchase` (`supplier_id`);--> statement-breakpoint
+CREATE INDEX `review_product_idx` ON `review` (`product_id`);--> statement-breakpoint
+CREATE INDEX `review_product_approved_idx` ON `review` (`product_id`,`is_approved`);--> statement-breakpoint
+CREATE INDEX `session_user_id_idx` ON `session` (`user_id`);--> statement-breakpoint
+CREATE INDEX `wishlist_user_product_idx` ON `wishlist` (`user_id`,`product_id`);

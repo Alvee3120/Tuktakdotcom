@@ -1,0 +1,11 @@
+export { WelcomeEmail } from './templates/welcome';
+export { OTPEmail } from './templates/otp';
+export { OrderConfirmationEmail } from './templates/order-confirmation';
+export { OrderConfirmedEmail } from './templates/order-confirmed';
+export { OrderProcessingEmail } from './templates/order-processing';
+export { OrderShippedEmail } from './templates/order-shipped';
+export { OrderDeliveredEmail } from './templates/order-delivered';
+export { OrderCancelledEmail } from './templates/order-cancelled';
+export { OrderRefundedEmail } from './templates/order-refunded';
+export { ShippingUpdateEmail } from './templates/shipping-update';
+export { PasswordResetEmail } from './templates/password-reset';

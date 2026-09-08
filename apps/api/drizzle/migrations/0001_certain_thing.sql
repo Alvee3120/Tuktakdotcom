@@ -1,0 +1,20 @@
+CREATE TABLE `hero_slide` (
+	`id` text PRIMARY KEY NOT NULL,
+	`title` text NOT NULL,
+	`subtitle` text,
+	`description` text,
+	`image` text NOT NULL,
+	`cta_text` text,
+	`cta_link` text,
+	`cta_secondary_text` text,
+	`cta_secondary_link` text,
+	`overlay_color` text DEFAULT 'from-black/60 to-transparent',
+	`text_align` text DEFAULT 'left',
+	`text_color` text DEFAULT '#ffffff',
+	`badge` text,
+	`badge_variant` text DEFAULT 'default',
+	`sort_order` integer DEFAULT 0 NOT NULL,
+	`is_active` integer DEFAULT true NOT NULL,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL
+);

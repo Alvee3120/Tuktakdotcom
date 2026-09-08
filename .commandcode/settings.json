@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(env -u NODE_ENV pnpm --filter web typecheck 2 >& 1)",
+      "Shell(env -u NODE_ENV DATABASE_URL=postgres://x:x@localhost:5432/x timeout 8 npx tsx src/index.ts 2 >& 1)",
+      "Shell(env -u NODE_ENV DATABASE_URL=postgres://x:x@localhost:5432/x timeout 6 ./node_modules/.bin/tsx src/index.ts 2 >& 1)",
+      "Shell(pkill -f \"tsx src/index.ts\" 2>/dev/null; pkill -f \"tsx.*index.ts\" 2>/dev/null; sleep 1; ss -ltnp 2>/dev/null | grep 8787 || echo \"port 8787 free\")",
+      "Shell(timeout 45 npx next dev 2 >& 1)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}

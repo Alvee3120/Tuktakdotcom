@@ -1,0 +1,1 @@
+ALTER TABLE hero_slide ADD COLUMN animation_duration INTEGER DEFAULT 700;

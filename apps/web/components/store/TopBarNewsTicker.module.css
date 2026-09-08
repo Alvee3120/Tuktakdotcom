@@ -1,0 +1,27 @@
+@reference "tailwindcss";
+/* News ticker: horizontal marquee for the storefront top bar */
+.ticker {
+  @apply flex items-center gap-2 overflow-hidden px-4 py-1.5 text-sm font-medium;
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+  width: 100%;
+}
+
+.track {
+  @apply flex items-center gap-6;
+  animation: ticker-scroll 28s linear infinite;
+}
+
+@keyframes ticker-scroll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-33.333%);
+  }
+}
+
+.link {
+  color: inherit;
+  text-decoration: underline;
+}

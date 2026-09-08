@@ -1,0 +1,1 @@
+ALTER TABLE `product_variant` ADD `low_stock_threshold` integer DEFAULT 5 NOT NULL;
