@@ -83,7 +83,7 @@ Then, in **Terminal**:
 ```bash
 cd ~/app/apps/api
 npm install --include=dev          # include=dev so drizzle-kit is present
-npx drizzle-kit migrate            # applies drizzle/migrations
+npx drizzle-kit push --force       # creates the schema from src/db/schema.ts
 ```
 
 Back in cPanel → **Restart** the application. Check
@@ -91,6 +91,11 @@ Back in cPanel → **Restart** the application. Check
 
 > `npm install --include=dev` is required: the app's `NODE_ENV=production`
 > otherwise makes npm skip devDependencies (`drizzle-kit`).
+
+> **Use `push`, not `migrate`.** The SQL files in `drizzle/migrations/` are
+> stale MySQL/SQLite artifacts and fail on PostgreSQL. `drizzle-kit push`
+> derives the schema directly from `src/db/schema.ts` and was verified to
+> produce the same 29 tables as the working dev database.
 
 ## 3. Web — Setup Node.js App
 
@@ -135,7 +140,7 @@ cPanel → **SSL/TLS Status** → select `tuktdot.com` and `api.tuktdot.com` →
 
 ```bash
 cd ~/app && git pull
-cd apps/api && npm install --include=dev && npx drizzle-kit migrate
+cd apps/api && npm install --include=dev && npx drizzle-kit push --force
 cd ../web && npm install --include=dev && npm run build
 ```
 
@@ -153,3 +158,6 @@ Then **Restart** both apps in cPanel.
   without Cloudflare the images serve as-is (harmless).
 - **Uploads disappearing** — `UPLOAD_DIR` must point to a persistent absolute
   path, and `GET /api/images/*` serves from it.
+- **`drizzle-kit migrate` fails with `syntax error at or near "`"`** — expected;
+  the checked-in migrations are MySQL/SQLite. Use `npx drizzle-kit push --force`
+  (see §2).

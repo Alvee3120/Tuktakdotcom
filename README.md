@@ -49,15 +49,20 @@ time), `NEXT_REVALIDATE_SECRET`, and the optional `NEXT_PUBLIC_R2_PUBLIC_URL`,
 
 ## Database
 
-Migrations live in `apps/api/drizzle/migrations`. Run them against the target
-database before starting the API:
+The schema is defined in `apps/api/src/db/schema.ts`. Create/sync it with:
 
 ```bash
-DATABASE_URL=postgres://… pnpm --filter api db:migrate
+DATABASE_URL=postgres://… pnpm --filter api db:push
 ```
 
-`drizzle-kit` is a dev dependency, so run migrations from a build/CI step (or a
-dev machine), not from a production-only install.
+> **Use `push`, not `migrate`.** The SQL files under `drizzle/migrations/` are
+> stale MySQL/SQLite artifacts and fail against PostgreSQL. `drizzle-kit push`
+> derives the schema from `schema.ts` directly (verified to produce the same 29
+> tables as the dev database). Regenerating a clean Postgres migration baseline
+> is a known follow-up.
+
+`drizzle-kit` is a dev dependency, so run this from a build/CI step (or a dev
+machine), not from a production-only install.
 
 ## Hosting
 
@@ -66,7 +71,7 @@ dev machine), not from a production-only install.
 ```bash
 pnpm install --frozen-lockfile
 pnpm --filter api build            # TypeScript check (no emit)
-pnpm --filter api db:migrate       # apply migrations
+pnpm --filter api db:push          # create/sync schema (see Database above)
 NODE_ENV=production pnpm --filter api start
 ```
 
