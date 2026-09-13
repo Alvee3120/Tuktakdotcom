@@ -70,6 +70,33 @@ export type TabbedShowcaseTab = {
   productIds: string[];
 };
 
+/** Auto-populated collection a Collection Tab draws its products from. */
+export type CollectionSource = 'trending' | 'bestSelling' | 'newArrival';
+
+/** A single tab inside the Collection Tabs section (auto-populated). */
+export type CollectionTab = {
+  id: string;
+  label: string;
+  labelBn?: string;
+  source: CollectionSource;
+};
+
+/** Where a Product Row pulls its products from. */
+export type ProductRowSource = CollectionSource | 'category';
+
+/** A titled product row auto-filled from a collection or a category. */
+export type ProductRow = {
+  id: string;
+  title: string;
+  titleBn?: string;
+  /** 'trending' | 'bestSelling' | 'newArrival' | 'category'. Defaults to trending. */
+  source?: ProductRowSource;
+  /** Category to pull products from when source === 'category'. */
+  categoryId?: string;
+  style?: 'carousel' | 'grid';
+  grid?: GridConfig;
+};
+
 /** A single tab inside the Category Tabs Showcase section. */
 export type CategoryTabsTab = {
   id: string;
@@ -105,6 +132,7 @@ export type Branding = {
 
 export type SectionKey =
   | 'categoryCircles'
+  | 'collectionTabs'
   | 'flashDeal'
   | 'tabbedShowcase'
   | 'categoryTabsShowcase'
@@ -114,19 +142,24 @@ export type SectionKey =
   | 'bestsellers'
   | 'promoBanners'
   | 'brandCarousel'
+  | 'productRows'
   | 'featureBar';
 
 export type HomeConfig = {
   productCardStyle: 'default' | 'compact';
-  /** Header layout: floating rounded pill (default) or full-width solid bar */
-  headerStyle: 'floating' | 'full';
-  /** Hero layout: boxed (max-width, rounded) or full-bleed edge-to-edge */
-  heroStyle: 'boxed' | 'full';
   branding: Branding;
   /** Ordered list of section keys — determines render order on the homepage */
   sectionOrder: SectionKey[];
   sections: {
     categoryCircles: { enabled: boolean; style: 'circle' | 'card'; visibleCount: number };
+    collectionTabs: {
+      enabled: boolean;
+      title?: string;
+      titleBn?: string;
+      style?: 'carousel' | 'grid';
+      grid?: GridConfig;
+      tabs: CollectionTab[];
+    };
     flashDeal: {
       enabled: boolean;
       title?: string;
@@ -215,6 +248,7 @@ export type HomeConfig = {
     };
     promoBanners: { enabled: boolean; style: 'twoCol' | 'stacked'; items: PromoBannerItem[] };
     brandCarousel: { enabled: boolean; style: 'carousel' | 'grid'; brands: BrandCarouselItem[] };
+    productRows: { enabled: boolean; rows: ProductRow[] };
     featureBar: { enabled: boolean; items: FeatureItem[] };
   };
 };
@@ -223,11 +257,10 @@ export const DEFAULT_GRID_CONFIG: GridConfig = { columns: 4, rows: 2 };
 
 export const DEFAULT_HOME_CONFIG: HomeConfig = {
   productCardStyle: 'default',
-  headerStyle: 'floating',
-  heroStyle: 'boxed',
   branding: { primaryColor: '', logoLight: '', logoDark: '', favicon: '' },
   sectionOrder: [
     'categoryCircles',
+    'collectionTabs',
     'flashDeal',
     'tabbedShowcase',
     'categoryTabsShowcase',
@@ -237,10 +270,22 @@ export const DEFAULT_HOME_CONFIG: HomeConfig = {
     'bestsellers',
     'promoBanners',
     'brandCarousel',
+    'productRows',
     'featureBar',
   ],
   sections: {
     categoryCircles: { enabled: true, style: 'circle', visibleCount: 6 },
+    collectionTabs: {
+      enabled: true,
+      title: '',
+      style: 'carousel',
+      grid: { columns: 4, rows: 1 },
+      tabs: [
+        { id: 'trending', label: 'Trending', source: 'trending' },
+        { id: 'bestSelling', label: 'Best Selling', source: 'bestSelling' },
+        { id: 'newArrival', label: 'New Arrival', source: 'newArrival' },
+      ],
+    },
     flashDeal: {
       enabled: true,
       title: '',
@@ -306,9 +351,53 @@ export const DEFAULT_HOME_CONFIG: HomeConfig = {
     },
     promoBanners: { enabled: true, style: 'twoCol', items: [] },
     brandCarousel: { enabled: true, style: 'carousel', brands: [] },
+    productRows: {
+      enabled: true,
+      rows: [
+        {
+          id: 'row1',
+          title: 'Smartphones',
+          source: 'category',
+          categoryId: 'cat-001',
+          style: 'carousel',
+          grid: { columns: 4, rows: 1 },
+        },
+        {
+          id: 'row2',
+          title: 'Gaming',
+          source: 'category',
+          categoryId: 'cat-006',
+          style: 'carousel',
+          grid: { columns: 4, rows: 1 },
+        },
+      ],
+    },
     featureBar: { enabled: true, items: [] },
   },
 };
+
+/**
+ * Merge a stored section order with the default one. A key missing from the
+ * stored order (e.g. a section added in a later release) is inserted at its
+ * default position — right after the nearest preceding key that is present —
+ * rather than being appended to the very end.
+ */
+function insertMissingKeys(stored: SectionKey[], defaultOrder: SectionKey[]): SectionKey[] {
+  const result = [...new Set(stored)];
+  for (const key of defaultOrder) {
+    if (result.includes(key)) continue;
+    let insertAt = 0;
+    for (let i = defaultOrder.indexOf(key) - 1; i >= 0; i--) {
+      const at = result.indexOf(defaultOrder[i]);
+      if (at !== -1) {
+        insertAt = at + 1;
+        break;
+      }
+    }
+    result.splice(insertAt, 0, key);
+  }
+  return result;
+}
 
 /** Deep-merge a partial stored config onto the defaults (one level per section). */
 export function mergeHomeConfig(raw: unknown): HomeConfig {
@@ -326,18 +415,26 @@ export function mergeHomeConfig(raw: unknown): HomeConfig {
 
   const allKeys = Object.keys(d) as SectionKey[];
   const storedOrder = partial.sectionOrder;
+  const defaultOrder = DEFAULT_HOME_CONFIG.sectionOrder;
   const sectionOrder: SectionKey[] = Array.isArray(storedOrder)
-    ? [...new Set([...storedOrder.filter((k) => allKeys.includes(k as SectionKey)), ...allKeys])]
-    : allKeys;
+    ? insertMissingKeys(
+        storedOrder.filter((k) => allKeys.includes(k as SectionKey)),
+        defaultOrder
+      )
+    : [...defaultOrder];
 
   return {
     productCardStyle: partial.productCardStyle === 'compact' ? 'compact' : 'default',
-    headerStyle: partial.headerStyle === 'full' ? 'full' : 'floating',
-    heroStyle: partial.heroStyle === 'full' ? 'full' : 'boxed',
     branding: { ...DEFAULT_HOME_CONFIG.branding, ...(partial.branding ?? {}) },
     sectionOrder,
     sections: {
       categoryCircles: { ...d.categoryCircles, ...sections.categoryCircles },
+      collectionTabs: {
+        ...d.collectionTabs,
+        ...sections.collectionTabs,
+        tabs: sections.collectionTabs?.tabs ?? d.collectionTabs.tabs,
+        grid: mergeGrid(d.collectionTabs.grid, sections.collectionTabs?.grid),
+      },
       flashDeal: {
         ...d.flashDeal,
         ...sections.flashDeal,
@@ -391,6 +488,11 @@ export function mergeHomeConfig(raw: unknown): HomeConfig {
         ...d.brandCarousel,
         ...sections.brandCarousel,
         brands: sections.brandCarousel?.brands ?? [],
+      },
+      productRows: {
+        ...d.productRows,
+        ...sections.productRows,
+        rows: sections.productRows?.rows ?? d.productRows.rows,
       },
       featureBar: {
         ...d.featureBar,

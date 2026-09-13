@@ -20,9 +20,11 @@ import {
   Zap,
   Layers,
   Grid3x3,
+  Flame,
   TrendingUp,
   Sparkles,
   LayoutGrid,
+  LayoutList,
   Award,
   Megaphone,
   Gem,
@@ -45,6 +47,7 @@ import type {
   SectionKey,
   HomeConfig,
   GridConfig,
+  CollectionTab,
   TabbedShowcaseTab,
   CategoryTabsTab,
   PromoBannerItem,
@@ -52,6 +55,8 @@ import type {
   ShowcaseTab,
   FeatureItem,
   FlashDealTab,
+  ProductRow,
+  ProductRowSource,
 } from '@/lib/home-config';
 
 /* ─── Section metadata ─── */
@@ -71,6 +76,13 @@ const SECTION_META: Record<
     desc: 'Horizontal scrollable category pills',
     color: 'text-blue-500',
     bgColor: 'bg-blue-500/10',
+  },
+  collectionTabs: {
+    icon: Flame,
+    label: 'Collection Tabs',
+    desc: 'Auto collections: trending, best selling, new arrivals',
+    color: 'text-fuchsia-500',
+    bgColor: 'bg-fuchsia-500/10',
   },
   flashDeal: {
     icon: Zap,
@@ -134,6 +146,13 @@ const SECTION_META: Record<
     desc: 'Featured brand logos carousel',
     color: 'text-indigo-500',
     bgColor: 'bg-indigo-500/10',
+  },
+  productRows: {
+    icon: LayoutList,
+    label: 'Product Rows',
+    desc: 'Titled product rows auto-filled from a category',
+    color: 'text-sky-500',
+    bgColor: 'bg-sky-500/10',
   },
   featureBar: {
     icon: ShieldCheck,
@@ -357,6 +376,126 @@ function SectionConfig({
             Categories are fetched automatically from your database. Shows top-level categories
             only.
           </p>
+        </div>
+      );
+
+    /* ── Collection Tabs (auto-populated) ── */
+    case 'collectionTabs':
+      return (
+        <div className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Title (EN) — optional</Label>
+              <Input
+                value={s.collectionTabs.title ?? ''}
+                onChange={(e) => setSection('collectionTabs', { title: e.target.value })}
+                placeholder="Leave empty to show tabs only"
+                className="h-8 text-sm"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Title (BN)</Label>
+              <Input
+                value={s.collectionTabs.titleBn ?? ''}
+                onChange={(e) => setSection('collectionTabs', { titleBn: e.target.value })}
+                placeholder="কালেকশন"
+                className="h-8 text-sm"
+              />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Layout</Label>
+            <select
+              value={s.collectionTabs.style ?? 'carousel'}
+              onChange={(e) =>
+                setSection('collectionTabs', { style: e.target.value as 'carousel' | 'grid' })
+              }
+              className={inputCls}
+            >
+              <option value="carousel">Carousel (one row + arrows)</option>
+              <option value="grid">Grid</option>
+            </select>
+          </div>
+          {s.collectionTabs.style === 'grid' && (
+            <GridConfigEditor
+              grid={s.collectionTabs.grid ?? { columns: 4, rows: 1 }}
+              onChange={(g) => setSection('collectionTabs', { grid: g })}
+            />
+          )}
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">Tabs (auto-populated)</Label>
+              <button
+                type="button"
+                onClick={() =>
+                  setSection('collectionTabs', {
+                    tabs: [
+                      ...s.collectionTabs.tabs,
+                      { id: `col_${Date.now()}`, label: 'New Tab', source: 'trending' },
+                    ],
+                  })
+                }
+                className="text-primary text-xs font-medium hover:underline"
+              >
+                + Add tab
+              </button>
+            </div>
+            {s.collectionTabs.tabs.map((tab, idx) => (
+              <div
+                key={tab.id}
+                className="border-border flex flex-wrap items-center gap-2 rounded-lg border p-2"
+              >
+                <Input
+                  value={tab.label}
+                  onChange={(e) => {
+                    const tabs = s.collectionTabs.tabs.map((t, i) =>
+                      i === idx ? { ...t, label: e.target.value } : t
+                    );
+                    setSection('collectionTabs', { tabs });
+                  }}
+                  placeholder="Label"
+                  className="h-8 w-28 text-sm"
+                />
+                <Input
+                  value={tab.labelBn ?? ''}
+                  onChange={(e) => {
+                    const tabs = s.collectionTabs.tabs.map((t, i) =>
+                      i === idx ? { ...t, labelBn: e.target.value } : t
+                    );
+                    setSection('collectionTabs', { tabs });
+                  }}
+                  placeholder="Label (BN)"
+                  className="h-8 w-28 text-sm"
+                />
+                <select
+                  value={tab.source}
+                  onChange={(e) => {
+                    const tabs = s.collectionTabs.tabs.map((t, i) =>
+                      i === idx ? { ...t, source: e.target.value as CollectionTab['source'] } : t
+                    );
+                    setSection('collectionTabs', { tabs });
+                  }}
+                  className="border-border bg-card h-8 rounded-md border px-2 text-xs focus:outline-none"
+                >
+                  <option value="trending">Trending (top rated)</option>
+                  <option value="bestSelling">Best Selling (most sold)</option>
+                  <option value="newArrival">New Arrival (newest)</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSection('collectionTabs', {
+                      tabs: s.collectionTabs.tabs.filter((_, i) => i !== idx),
+                    })
+                  }
+                  className="text-destructive ml-auto text-xs hover:underline"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       );
 
@@ -1078,6 +1217,15 @@ function SectionConfig({
         </div>
       );
 
+    /* ── Product Rows ── */
+    case 'productRows':
+      return (
+        <ProductRowsConfig
+          rows={s.productRows.rows}
+          onChange={(rows) => setSection('productRows', { rows })}
+        />
+      );
+
     /* ── Promo Banners ── */
     case 'promoBanners':
       return (
@@ -1169,6 +1317,136 @@ function SectionLayoutConfig({
         </select>
       </div>
       {style === 'grid' && grid && <GridConfigEditor grid={grid} onChange={onGridChange} />}
+    </div>
+  );
+}
+
+/* ─── Product Rows config (title + category + layout per row) ─── */
+function ProductRowsConfig({
+  rows,
+  onChange,
+}: {
+  rows: ProductRow[];
+  onChange: (rows: ProductRow[]) => void;
+}) {
+  const { data: catData } = useCategories();
+  const categories = catData?.data ?? [];
+
+  const update = (idx: number, patch: Partial<ProductRow>) =>
+    onChange(rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <Label className="text-xs">Rows ({rows.length})</Label>
+        <button
+          type="button"
+          onClick={() =>
+            onChange([
+              ...rows,
+              {
+                id: `row_${Date.now()}`,
+                title: '',
+                style: 'carousel',
+                grid: { columns: 4, rows: 1 },
+              },
+            ])
+          }
+          className="bg-primary/10 text-primary hover:bg-primary/20 rounded-md px-2.5 py-1 text-[10px] font-medium transition-colors"
+        >
+          + Add row
+        </button>
+      </div>
+
+      {rows.length === 0 && (
+        <p className="border-border text-muted-foreground rounded-lg border border-dashed py-4 text-center text-[10px]">
+          No rows yet. Add a row, give it a title and pick a category.
+        </p>
+      )}
+
+      {rows.map((row, idx) => {
+        const rowSource: ProductRowSource =
+          row.source ?? (row.categoryId ? 'category' : 'trending');
+        return (
+        <div key={row.id} className="border-border space-y-2 rounded-lg border p-3">
+          <div className="flex items-center gap-2">
+            <span className="bg-muted text-muted-foreground flex h-5 w-5 shrink-0 items-center justify-center rounded text-[9px] font-semibold">
+              {idx + 1}
+            </span>
+            <Input
+              value={row.title}
+              onChange={(e) => update(idx, { title: e.target.value })}
+              placeholder="Title (EN)"
+              className="h-8 min-w-0 flex-1 text-sm"
+            />
+            <Input
+              value={row.titleBn ?? ''}
+              onChange={(e) => update(idx, { titleBn: e.target.value })}
+              placeholder="Title (BN)"
+              className="h-8 w-24 min-w-0 text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => onChange(rows.filter((_, i) => i !== idx))}
+              className="bg-destructive/10 text-destructive hover:bg-destructive/20 shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="space-y-1">
+              <Label className="text-[10px]">Source</Label>
+              <select
+                value={rowSource}
+                onChange={(e) => update(idx, { source: e.target.value as ProductRowSource })}
+                className="border-border bg-card h-8 w-full rounded-md border px-2 text-xs focus:outline-none"
+              >
+                <option value="trending">Trending (top rated)</option>
+                <option value="bestSelling">Best Selling (most sold)</option>
+                <option value="newArrival">New Arrival (newest)</option>
+                <option value="category">Category</option>
+              </select>
+            </div>
+            {rowSource === 'category' && (
+              <div className="space-y-1">
+                <Label className="text-[10px]">Category</Label>
+                <select
+                  value={row.categoryId ?? ''}
+                  onChange={(e) => update(idx, { categoryId: e.target.value })}
+                  className="border-border bg-card h-8 w-full rounded-md border px-2 text-xs focus:outline-none"
+                >
+                  <option value="">All products (newest)</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="space-y-1">
+              <Label className="text-[10px]">Layout</Label>
+              <select
+                value={row.style ?? 'carousel'}
+                onChange={(e) => update(idx, { style: e.target.value as 'carousel' | 'grid' })}
+                className="border-border bg-card h-8 w-full rounded-md border px-2 text-xs focus:outline-none"
+              >
+                <option value="carousel">Carousel</option>
+                <option value="grid">Grid</option>
+              </select>
+            </div>
+          </div>
+
+          {row.style === 'grid' && (
+            <GridConfigEditor
+              grid={row.grid ?? { columns: 4, rows: 1 }}
+              onChange={(g) => update(idx, { grid: g })}
+            />
+          )}
+        </div>
+        );
+      })}
     </div>
   );
 }

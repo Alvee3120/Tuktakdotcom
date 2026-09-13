@@ -14,15 +14,42 @@
  */
 import {
   boolean,
+  customType,
   index,
   integer,
   pgTable,
   text,
-  timestamp,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
 import { ORDER_STATUSES } from '@/lib/order-status';
+
+/**
+ * Timestamp column that accepts both ISO strings and `Date` objects on write.
+ *
+ * Columns stay string-mode so the app's existing ISO-string inserts keep
+ * working. Drizzle's built-in string-mode timestamp leaves `mapToDriverValue`
+ * as identity, so a `Date` reaches postgres.js untouched and it rejects the
+ * value for a text-typed bind parameter (`ERR_INVALID_ARG_TYPE`). Better Auth
+ * writes Dates for createdAt/updatedAt/expiresAt, which broke sign-up and the
+ * admin/moderator seeders with FAILED_TO_CREATE_USER. Converting here covers
+ * every writer, including Better Auth's internal transaction path.
+ */
+const isoTimestamp = customType<{ data: string; driverData: string }>({
+  dataType() {
+    return 'timestamp';
+  },
+  toDriver(value: string | Date) {
+    return value instanceof Date ? value.toISOString() : value;
+  },
+  fromDriver(value: string | Date) {
+    // postgres.js parses `timestamp` into a Date; return the same shape the
+    // string-mode column used to (no trailing Z, space-separated) so existing
+    // readers that wrap this in `new Date(...)` behave unchanged.
+    if (typeof value === 'string') return value;
+    return value.toISOString().slice(0, -1).replace('T', ' ');
+  },
+});
 
 // ═══════════════════════════════════════════════════
 // AUTH TABLES (Required by Better Auth)
@@ -44,8 +71,8 @@ export const users = pgTable(
     permissions: text('permissions'), // JSON array of page keys for moderators
     banned: boolean('banned').notNull().default(false),
     banReason: text('ban_reason'),
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-    updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
+    updatedAt: isoTimestamp('updated_at').notNull(),
   },
   (t) => [index('user_created_idx').on(t.createdAt)]
 );
@@ -59,12 +86,12 @@ export const sessions = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     token: text('token').notNull().unique(),
-    expiresAt: timestamp('expires_at', { mode: 'string' }).notNull(),
+    expiresAt: isoTimestamp('expires_at').notNull(),
     ipAddress: text('ip_address'),
     userAgent: text('user_agent'),
     activeOrganizationId: text('active_organization_id'),
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-    updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
+    updatedAt: isoTimestamp('updated_at').notNull(),
   },
   (t) => [index('session_user_id_idx').on(t.userId)]
 );
@@ -79,13 +106,13 @@ export const accounts = pgTable('account', {
   providerId: text('provider_id').notNull(),
   accessToken: text('access_token'),
   refreshToken: text('refresh_token'),
-  accessTokenExpiresAt: timestamp('access_token_expires_at', { mode: 'string' }),
-  refreshTokenExpiresAt: timestamp('refresh_token_expires_at', { mode: 'string' }),
+  accessTokenExpiresAt: isoTimestamp('access_token_expires_at'),
+  refreshTokenExpiresAt: isoTimestamp('refresh_token_expires_at'),
   scope: text('scope'),
   idToken: text('id_token'),
   password: text('password'),
-  createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-  updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+  createdAt: isoTimestamp('created_at').notNull(),
+  updatedAt: isoTimestamp('updated_at').notNull(),
 });
 
 /** Verification table — email/password reset OTPs */
@@ -93,9 +120,9 @@ export const verifications = pgTable('verification', {
   id: text('id').primaryKey(),
   identifier: text('identifier').notNull(),
   value: text('value').notNull(),
-  expiresAt: timestamp('expires_at', { mode: 'string' }).notNull(),
-  createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-  updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+  expiresAt: isoTimestamp('expires_at').notNull(),
+  createdAt: isoTimestamp('created_at').notNull(),
+  updatedAt: isoTimestamp('updated_at').notNull(),
 });
 
 // ═══════════════════════════════════════════════════
@@ -114,8 +141,8 @@ export const categories = pgTable(
     parentId: text('parent_id'),
     sortOrder: integer('sort_order').notNull().default(0),
     isActive: boolean('is_active').notNull().default(true),
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-    updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
+    updatedAt: isoTimestamp('updated_at').notNull(),
   },
   (t) => [index('category_parent_idx').on(t.parentId)]
 );
@@ -149,8 +176,8 @@ export const products = pgTable(
     reviewCount: integer('review_count').notNull().default(0),
     metaTitle: text('meta_title'),
     metaDescription: text('meta_description'),
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-    updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
+    updatedAt: isoTimestamp('updated_at').notNull(),
   },
   (t) => [
     index('product_category_idx').on(t.categoryId),
@@ -168,8 +195,8 @@ export const brands = pgTable('brand', {
   slug: text('slug').notNull().unique(),
   logo: text('logo'),
   isActive: boolean('is_active').notNull().default(true),
-  createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-  updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+  createdAt: isoTimestamp('created_at').notNull(),
+  updatedAt: isoTimestamp('updated_at').notNull(),
 });
 
 /** Product Variants — size/color/storage options */
@@ -190,8 +217,8 @@ export const productVariants = pgTable(
     image: text('image'),
     attributes: text('attributes'), // JSON: { color: "black", storage: "128gb" }
     isActive: boolean('is_active').notNull().default(true),
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-    updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
+    updatedAt: isoTimestamp('updated_at').notNull(),
   },
   (t) => [index('variant_product_idx').on(t.productId)]
 );
@@ -212,8 +239,8 @@ export const addresses = pgTable(
     district: text('district'),
     postalCode: text('postal_code'),
     isDefault: boolean('is_default').notNull().default(false),
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-    updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
+    updatedAt: isoTimestamp('updated_at').notNull(),
   },
   (t) => [index('address_user_idx').on(t.userId)]
 );
@@ -254,8 +281,8 @@ export const orders = pgTable(
     invoiceAccessToken: text('invoice_access_token'), // cryptographically secure token for guest invoice access
     voucherNumber: text('voucher_number'), // unique voucher number generated on order creation (unique via order_voucher_number_unique below)
     voucherQrKey: text('voucher_qr_key'), // R2 key for QR PNG (vouchers/<orderId>.png)
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-    updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
+    updatedAt: isoTimestamp('updated_at').notNull(),
   },
   (t) => [
     index('order_user_idx').on(t.userId),
@@ -289,7 +316,7 @@ export const orderItems = pgTable(
     price: integer('price').notNull(),
     cost: integer('cost'), // cost price snapshot at purchase time (for profit reports)
     quantity: integer('quantity').notNull(),
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
   },
   (t) => [
     index('order_item_order_idx').on(t.orderId),
@@ -305,8 +332,8 @@ export const inventories = pgTable('inventory', {
   location: text('location'),
   description: text('description'),
   isActive: boolean('is_active').notNull().default(true),
-  createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-  updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+  createdAt: isoTimestamp('created_at').notNull(),
+  updatedAt: isoTimestamp('updated_at').notNull(),
 });
 
 /** Per-inventory stock for each product (product.stock stays the total) */
@@ -321,8 +348,8 @@ export const inventoryStock = pgTable(
       .notNull()
       .references(() => products.id, { onDelete: 'cascade' }),
     quantity: integer('quantity').notNull().default(0),
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-    updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
+    updatedAt: isoTimestamp('updated_at').notNull(),
   },
   (t) => [
     uniqueIndex('inv_stock_unique').on(t.inventoryId, t.productId),
@@ -347,8 +374,8 @@ export const reviews = pgTable(
     body: text('body'),
     isApproved: boolean('is_approved').notNull().default(false),
     isVerifiedPurchase: boolean('is_verified_purchase').notNull().default(false),
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-    updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
+    updatedAt: isoTimestamp('updated_at').notNull(),
   },
   (t) => [
     index('review_product_idx').on(t.productId),
@@ -371,10 +398,10 @@ export const coupons = pgTable('coupon', {
   usageLimit: integer('usage_limit'),
   usageCount: integer('usage_count').notNull().default(0),
   isActive: boolean('is_active').notNull().default(true),
-  startsAt: timestamp('starts_at', { mode: 'string' }),
-  expiresAt: timestamp('expires_at', { mode: 'string' }),
-  createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-  updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+  startsAt: isoTimestamp('starts_at'),
+  expiresAt: isoTimestamp('expires_at'),
+  createdAt: isoTimestamp('created_at').notNull(),
+  updatedAt: isoTimestamp('updated_at').notNull(),
 });
 
 /** Hero Slides — homepage carousel/slides */
@@ -426,8 +453,8 @@ export const heroSlides = pgTable(
     showSubtitle: boolean('show_subtitle').default(true),
     sortOrder: integer('sort_order').notNull().default(0),
     isActive: boolean('is_active').notNull().default(true),
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-    updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
+    updatedAt: isoTimestamp('updated_at').notNull(),
   },
   (t) => [index('hero_slide_sort_idx').on(t.sortOrder)]
 );
@@ -442,9 +469,9 @@ export const contactMessages = pgTable(
     subject: text('subject'),
     message: text('message').notNull(),
     isRead: boolean('is_read').notNull().default(false),
-    repliedAt: timestamp('replied_at', { mode: 'string' }),
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-    updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+    repliedAt: isoTimestamp('replied_at'),
+    createdAt: isoTimestamp('created_at').notNull(),
+    updatedAt: isoTimestamp('updated_at').notNull(),
   },
   (t) => [index('contact_message_created_idx').on(t.createdAt)]
 );
@@ -453,7 +480,7 @@ export const contactMessages = pgTable(
 export const settings = pgTable('setting', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
-  updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+  updatedAt: isoTimestamp('updated_at').notNull(),
 });
 
 /** Blocklist — blocked phones/IPs for fake-order protection (always enforced) */
@@ -464,7 +491,7 @@ export const blocklist = pgTable(
     type: text('type', { enum: ['phone', 'ip'] }).notNull(),
     value: text('value').notNull(), // normalized: phone digits (880...) / ip string
     reason: text('reason'),
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
   },
   (t) => [uniqueIndex('blocklist_unique').on(t.type, t.value)]
 );
@@ -473,7 +500,7 @@ export const blocklist = pgTable(
 export const courierCheckCache = pgTable('courier_check_cache', {
   phone: text('phone').primaryKey(), // normalized digits (880...)
   data: text('data').notNull(), // normalized JSON report
-  checkedAt: timestamp('checked_at', { mode: 'string' }).notNull(),
+  checkedAt: isoTimestamp('checked_at').notNull(),
 });
 
 /** Expenses — business costs for the P&L (ads, rent, salary, packaging...) */
@@ -485,8 +512,8 @@ export const expenses = pgTable(
     amount: integer('amount').notNull(), // whole BDT
     note: text('note'),
     date: text('date').notNull(), // YYYY-MM-DD
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-    updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
+    updatedAt: isoTimestamp('updated_at').notNull(),
   },
   (t) => [index('expense_date_idx').on(t.date)]
 );
@@ -499,8 +526,8 @@ export const suppliers = pgTable('supplier', {
   address: text('address'),
   note: text('note'),
   isActive: boolean('is_active').notNull().default(true),
-  createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-  updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+  createdAt: isoTimestamp('created_at').notNull(),
+  updatedAt: isoTimestamp('updated_at').notNull(),
 });
 
 /** Purchases from suppliers — due = totalAmount - paidAmount */
@@ -515,8 +542,8 @@ export const purchases = pgTable(
     totalAmount: integer('total_amount').notNull(),
     paidAmount: integer('paid_amount').notNull().default(0),
     date: text('date').notNull(), // YYYY-MM-DD
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-    updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
+    updatedAt: isoTimestamp('updated_at').notNull(),
   },
   (t) => [index('purchase_supplier_idx').on(t.supplierId)]
 );
@@ -533,10 +560,10 @@ export const blogPosts = pgTable(
     image: text('image'),
     author: text('author').notNull().default('Tuktak'),
     tags: text('tags'),
-    publishedAt: timestamp('published_at', { mode: 'string' }),
+    publishedAt: isoTimestamp('published_at'),
     isPublished: boolean('is_published').notNull().default(false),
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-    updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
+    updatedAt: isoTimestamp('updated_at').notNull(),
   },
   (t) => [index('blog_post_published_idx').on(t.isPublished, t.publishedAt)]
 );
@@ -548,7 +575,7 @@ export const newsletterSubscribers = pgTable(
     id: text('id').primaryKey(),
     email: text('email').notNull().unique(),
     isActive: boolean('is_active').notNull().default(true),
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
   },
   (t) => [index('newsletter_subscriber_created_idx').on(t.createdAt)]
 );
@@ -566,8 +593,8 @@ export const variantTypes = pgTable(
       .notNull()
       .default('custom'),
     sortOrder: integer('sort_order').notNull().default(0),
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-    updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
+    updatedAt: isoTimestamp('updated_at').notNull(),
   },
   (t) => [
     index('variant_type_product_idx').on(t.productId),
@@ -586,8 +613,8 @@ export const variantOptions = pgTable(
     name: text('name').notNull(), // e.g., "Red", "XL", "256GB"
     value: text('value'), // e.g., "#FF0000" for colors, or same as name
     sortOrder: integer('sort_order').notNull().default(0),
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
-    updatedAt: timestamp('updated_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
+    updatedAt: isoTimestamp('updated_at').notNull(),
   },
   (t) => [
     index('variant_option_type_idx').on(t.variantTypeId),
@@ -606,7 +633,7 @@ export const wishlist = pgTable(
     productId: text('product_id')
       .notNull()
       .references(() => products.id, { onDelete: 'cascade' }),
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
   },
   (t) => [uniqueIndex('wishlist_user_product_idx').on(t.userId, t.productId)]
 );
@@ -622,7 +649,7 @@ export const emailLogs = pgTable(
     status: text('status', { enum: ['sent', 'failed'] }).notNull(),
     orderId: text('order_id'),
     error: text('error'),
-    createdAt: timestamp('created_at', { mode: 'string' }).notNull(),
+    createdAt: isoTimestamp('created_at').notNull(),
   },
   (t) => [
     index('email_logs_order_idx').on(t.orderId),

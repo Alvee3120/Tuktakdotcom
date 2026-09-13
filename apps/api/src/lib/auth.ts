@@ -12,8 +12,6 @@ export function createAuth(env: Env) {
   const db = createDb();
   const isProduction = env.NODE_ENV === 'production';
 
-  // The Postgres drizzle adapter handles Date objects natively — no monkey
-  // patching needed (the SQLite/D1 adapter needed supportsDates=false).
   const adapter = drizzleAdapter(db, {
     provider: 'pg',
     debugLogs: !isProduction,
@@ -61,7 +59,12 @@ export function createAuth(env: Env) {
 
     advanced: {
       database: {
-        generateId: 'uuid',
+        // `generateId: 'uuid'` defers id generation to the database on
+        // Postgres (the adapter reports supportsUUIDs: true there), but our
+        // `id` columns are plain `text` with no default — inserts then fail
+        // with `null value in column "id"`. Generating the UUID here keeps the
+        // documented `crypto.randomUUID()` text-id contract.
+        generateId: () => crypto.randomUUID(),
       },
       // Local dev is served over http:// so cookies must not be Secure-only.
       useSecureCookies: env.NODE_ENV === 'production',

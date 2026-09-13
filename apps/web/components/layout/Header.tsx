@@ -1,6 +1,6 @@
 'use client';
 
-import { Heart, Menu, ShoppingCart, User, ChevronRight, Package } from 'lucide-react';
+import { ChevronRight, Heart, Menu, Package, ShoppingCart, User, X } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -11,15 +11,14 @@ import { LanguageSwitcher } from '@/components/shared/LanguageSwitcher';
 import { Logo } from '@/components/shared/Logo';
 import { ThemeToggle } from '@/components/shared/ThemeToggle';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { UserAvatar } from '@/components/ui/UserAvatar';
 import { useAuth } from '@/hooks/useAuth';
 import { useCategories } from '@/hooks/useCatalog';
 import { ICON_MAP } from '@/lib/icon-map';
 import { type MenuItem, DEFAULT_MENU_CONFIG } from '@/lib/menu-config';
-import { cn } from '@/lib/utils';
-import { useCartCount } from '@/stores/useCartStore';
+import { cn, formatPrice } from '@/lib/utils';
+import { useCartCount, useCartTotal } from '@/stores/useCartStore';
 import { useUIStore } from '@/stores/useUIStore';
 
 const SearchCommand = dynamic(
@@ -30,13 +29,11 @@ const SearchCommand = dynamic(
 type MenuConfig = { mainMenu: MenuItem[]; mobileMenu: MenuItem[] };
 
 export function Header({
-  variant = 'floating',
   logoLight,
   logoDark,
   menuConfig,
   locale = 'en',
 }: {
-  variant?: 'floating' | 'full';
   logoLight?: string;
   logoDark?: string;
   menuConfig?: MenuConfig;
@@ -45,18 +42,38 @@ export function Header({
   const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  // Desktop: nav re-opened via the hamburger while scrolled.
+  const [navOpen, setNavOpen] = useState(false);
   const cartCount = useCartCount();
+  const cartTotal = useCartTotal();
   const openCart = useUIStore((s) => s.openCart);
   const { user } = useAuth();
-  const isFull = variant === 'full';
 
   const mainMenu = menuConfig?.mainMenu ?? DEFAULT_MENU_CONFIG.mainMenu;
 
+  // Hysteresis: collapse after scrolling well past the top, but only re-expand
+  // near it. A single threshold oscillates — collapsing the nav shrinks the
+  // sticky header, which shifts the scroll anchor and nudges scrollY back under
+  // the threshold, so the header blinks rapidly around it.
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 20);
+    const COLLAPSE_AT = 80;
+    const EXPAND_AT = 24;
+    const onScroll = () => {
+      const y = window.scrollY;
+      setScrolled((prev) => (prev ? y > EXPAND_AT : y > COLLAPSE_AT));
+    };
+    onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
+
+  // Navigating closes the re-opened nav so the next page starts collapsed.
+  // Adjusted during render (React's recommended alternative to a syncing effect).
+  const [navPath, setNavPath] = useState(pathname);
+  if (navPath !== pathname) {
+    setNavPath(pathname);
+    setNavOpen(false);
+  }
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/';
@@ -65,176 +82,174 @@ export function Header({
     return pathname === path || pathname.startsWith(`${path}/`);
   };
 
+  const showNav = !scrolled || navOpen;
+
   return (
-    <>
-      <div className="relative z-50">
-        <div
-          className={
-            isFull
-              ? 'border-primary/10 bg-primary/5 dark:bg-primary/10 w-full border-b backdrop-blur-md'
-              : 'mx-auto max-w-screen-2xl px-2 pt-1 sm:px-3 lg:px-4'
-          }
-        >
-          <header
-            className={cn(
-              'flex items-center justify-between px-3 py-1 transition-all duration-300',
-              isFull ? 'mx-auto max-w-screen-2xl sm:px-3 lg:px-4' : 'rounded-[24px] border',
-              !isFull && scrolled
-                ? 'bg-background/80 border-white/20 shadow-lg shadow-black/5 backdrop-blur-xl dark:border-white/10 dark:shadow-black/20'
-                : !isFull
-                  ? 'bg-background/60 border-white/10 backdrop-blur-md dark:border-white/5'
-                  : ''
+    <div className="sticky top-0 z-50 [overflow-anchor:none]">
+      {/* ── Bar 1: brand color ──
+           Mobile: hamburger (left) · logo (center) · search icon + cart (right)
+           Desktop: [hamburger] · logo · centered search box · account · wishlist · cart */}
+      <div className="bg-primary text-white">
+        <div className="relative mx-auto flex h-14 max-w-screen-2xl items-center gap-2 px-3 sm:gap-3 sm:px-4">
+          {/* Left group — mobile menu trigger, desktop nav toggle + logo */}
+          <div className="flex shrink-0 items-center gap-1">
+            {/* Mobile menu (hamburger) — left on phones/tablets */}
+            <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+              <SheetTrigger asChild>
+                <button
+                  aria-label="Open menu"
+                  className="flex h-9 w-9 items-center justify-center rounded-md text-white transition-colors hover:bg-white/10 lg:hidden"
+                >
+                  <Menu className="h-5 w-5" />
+                </button>
+              </SheetTrigger>
+              <SheetContent side="left" className="w-72 p-0">
+                <MobileNav
+                  onClose={() => setMobileMenuOpen(false)}
+                  menuConfig={menuConfig}
+                  locale={locale}
+                  logoLight={logoLight}
+                  logoDark={logoDark}
+                />
+              </SheetContent>
+            </Sheet>
+
+            {/* Desktop nav re-open toggle — only once scrolled */}
+            {scrolled && (
+              <button
+                onClick={() => setNavOpen((v) => !v)}
+                aria-label={navOpen ? 'Hide menu' : 'Show menu'}
+                aria-expanded={navOpen}
+                className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-md text-white transition-colors hover:bg-white/10 lg:flex"
+              >
+                {navOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+              </button>
             )}
-          >
-            {/* Left: Logo + Desktop Nav — no extra padding around logo for compact look */}
-            <div className="flex items-center gap-1 sm:gap-3 lg:gap-6">
-              <Logo size="sm" className="" lightSrc={logoLight} darkSrc={logoDark} />
 
-              {/* Desktop Navigation — configurable menu items */}
-              <nav className="hidden items-center gap-1 lg:flex">
-                {mainMenu.map((item) => {
-                  const hasChildren = (item.children?.length ?? 0) > 0;
-                  const itemLabel = locale === 'bn' && item.labelBn ? item.labelBn : item.label;
-
-                  // Simple link items
-                  if (!hasChildren) {
-                    const href =
-                      item.type === 'category' && item.categoryId
-                        ? `/products?category=${item.categoryId}`
-                        : item.href || '#';
-                    const active = isActive(href);
-                    const NavIcon = ICON_MAP[item.icon ?? ''];
-                    return (
-                      <Link
-                        key={item.id}
-                        href={href}
-                        target={item.openInNewTab ? '_blank' : undefined}
-                        className={cn(
-                          'flex items-center gap-1 rounded-full px-4 py-1 text-sm font-medium transition-all duration-200',
-                          active
-                            ? 'bg-primary/10 text-primary'
-                            : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-                        )}
-                      >
-                        {NavIcon && <NavIcon className="h-4 w-4" />}
-                        {itemLabel}
-                      </Link>
-                    );
-                  }
-
-                  // Items with children → MegaMenu dropdown
-                  return (
-                    <MegaMenuItem
-                      key={item.id}
-                      item={item}
-                      isActive={isActive(item.href || '#')}
-                      locale={locale}
-                    />
-                  );
-                })}
-              </nav>
+            {/* Desktop logo */}
+            <div className="hidden shrink-0 lg:block">
+              <Logo size="sm" onDark lightSrc={logoLight} darkSrc={logoDark} />
             </div>
+          </div>
 
-            {/* Right: Actions */}
-            <div className="flex items-center gap-0.5 sm:gap-1">
-              {/* Search — single mount; internal styles are responsive for all breakpoints */}
+          {/* Mobile logo — absolutely centred in the bar */}
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 lg:hidden">
+            <Logo size="sm" onDark lightSrc={logoLight} darkSrc={logoDark} />
+          </div>
+
+          {/* Desktop: search box, centred between logo and actions */}
+          <div className="hidden min-w-0 flex-1 justify-center px-4 lg:flex">
+            <div className="w-full max-w-xl">
               <SearchCommand />
+            </div>
+          </div>
 
-              {/* Track Order — desktop (hidden below md/768px to keep header compact on mobile) */}
-              <Link
-                href="/tracking"
-                className="border-border text-muted-foreground hover:bg-accent/50 hover:text-foreground hidden items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors md:flex"
-              >
-                <Package className="h-3.5 w-3.5" />
-                Track Order
-              </Link>
+          {/* Right group — mobile: search icon + cart; desktop: account + wishlist + cart */}
+          <div className="ml-auto flex shrink-0 items-center gap-0.5 sm:gap-1.5">
+            {/* Mobile search icon — opens the search dialog (no box) */}
+            <SearchCommand variant="icon" enableShortcut={false} className="lg:hidden" />
 
-              {/* Wishlist — desktop only (bottom nav has it on mobile) */}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="hidden rounded-full md:flex"
-                aria-label="Wishlist"
-                asChild
-              >
-                <Link href="/wishlist">
-                  <Heart className="h-3.5 w-3.5" />
-                </Link>
-              </Button>
+            {/* Account — desktop only */}
+            <Link
+              href={user ? '/account' : '/login'}
+              className="hidden items-center gap-1.5 rounded-md px-1.5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-white/10 sm:px-2 lg:flex"
+            >
+              {user ? (
+                <>
+                  <UserAvatar image={user.image} name={user.name} size="sm" />
+                  <span className="hidden max-w-[80px] truncate sm:inline">
+                    {user.name.split(' ')[0]}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <User className="h-5 w-5" />
+                  <span className="hidden sm:inline">Log in</span>
+                </>
+              )}
+            </Link>
 
-              {/* Cart — desktop only (bottom nav + FloatingCart handle it on mobile) */}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="relative hidden rounded-full md:flex"
-                aria-label="Cart"
-                onClick={openCart}
-              >
-                <ShoppingCart className="h-3.5 w-3.5" />
+            {/* Wishlist — desktop only */}
+            <Link
+              href="/wishlist"
+              aria-label="Wishlist"
+              className="hidden h-9 w-9 items-center justify-center rounded-md text-white transition-colors hover:bg-white/10 lg:flex"
+            >
+              <Heart className="h-5 w-5" />
+            </Link>
+
+            {/* Cart — icon (mobile) / icon + running total (desktop) */}
+            <button
+              onClick={openCart}
+              aria-label="Cart"
+              className="flex items-center gap-1.5 rounded-md px-1.5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-white/10 sm:px-2"
+            >
+              <span className="relative">
+                <ShoppingCart className="h-5 w-5" />
                 {cartCount > 0 && (
-                  <Badge className="bg-primary text-primary-foreground absolute -right-0.5 -top-0.5 flex h-4 w-4 min-w-0 items-center justify-center rounded-full p-0 text-[10px]">
+                  <Badge className="bg-background text-primary absolute -right-1.5 -top-1.5 flex h-4 w-4 min-w-0 items-center justify-center rounded-full p-0 text-[10px]">
                     {cartCount > 99 ? '99+' : cartCount}
                   </Badge>
                 )}
-              </Button>
-
-              {/* Language + Theme — desktop */}
-              <div className="hidden items-center gap-1 md:flex">
-                <LanguageSwitcher />
-                <ThemeToggle />
-              </div>
-
-              {/* Account — Sign In button (desktop) */}
-              <Link
-                href={user ? '/account' : '/login'}
-                className="border-border bg-muted/30 text-foreground hover:bg-accent/50 hover:text-foreground hidden items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-all md:flex"
-              >
-                {user ? (
-                  <>
-                    <UserAvatar image={user.image} name={user.name} size="sm" />
-                    <span className="max-w-[80px] truncate">{user.name.split(' ')[0]}</span>
-                  </>
-                ) : (
-                  <>
-                    <User className="h-3.5 w-3.5" />
-                    <span>Sign In</span>
-                  </>
-                )}
-              </Link>
-
-              {/* Language + Theme — mobile */}
-              <div className="flex items-center gap-0.5 sm:hidden">
-                <LanguageSwitcher />
-                <ThemeToggle />
-              </div>
-
-              {/* Mobile Menu Trigger */}
-              <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-                <SheetTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="rounded-full lg:hidden"
-                    aria-label="Menu"
-                  >
-                    <Menu className="h-5 w-5" />
-                  </Button>
-                </SheetTrigger>
-                <SheetContent side="left" className="w-72 p-0">
-                  <MobileNav
-                    onClose={() => setMobileMenuOpen(false)}
-                    menuConfig={menuConfig}
-                    locale={locale}
-                    logoLight={logoLight}
-                    logoDark={logoDark}
-                  />
-                </SheetContent>
-              </Sheet>
-            </div>
-          </header>
+              </span>
+              <span className="hidden whitespace-nowrap tabular-nums lg:inline">
+                {formatPrice(cartTotal)}
+              </span>
+            </button>
+          </div>
         </div>
       </div>
-    </>
+
+      {/* ── Bar 2: light nav — desktop only, collapses once scrolled ── */}
+      <div
+        className={cn(
+          'border-border bg-background hidden border-b transition-[grid-template-rows] duration-300 lg:grid',
+          showNav ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+        )}
+      >
+        <div className="overflow-hidden">
+          <nav className="mx-auto flex max-w-screen-2xl items-center justify-center gap-1 px-4 py-1.5">
+            {mainMenu.map((item) => {
+              const hasChildren = (item.children?.length ?? 0) > 0;
+              const itemLabel = locale === 'bn' && item.labelBn ? item.labelBn : item.label;
+
+              if (!hasChildren) {
+                const href =
+                  item.type === 'category' && item.categoryId
+                    ? `/products?category=${item.categoryId}`
+                    : item.href || '#';
+                const NavIcon = ICON_MAP[item.icon ?? ''];
+                return (
+                  <Link
+                    key={item.id}
+                    href={href}
+                    target={item.openInNewTab ? '_blank' : undefined}
+                    className={cn(
+                      'flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-200',
+                      isActive(href)
+                        ? 'text-primary'
+                        : 'text-foreground/80 hover:bg-muted hover:text-foreground'
+                    )}
+                  >
+                    {NavIcon && <NavIcon className="h-4 w-4" />}
+                    {itemLabel}
+                  </Link>
+                );
+              }
+
+              return (
+                <MegaMenuItem
+                  key={item.id}
+                  item={item}
+                  isActive={isActive(item.href || '#')}
+                  locale={locale}
+                />
+              );
+            })}
+          </nav>
+        </div>
+      </div>
+    </div>
   );
 }
 

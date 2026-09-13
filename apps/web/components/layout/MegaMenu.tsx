@@ -115,19 +115,19 @@ export function MegaMenuItem({
         setHoveredChild(null);
       }}
     >
-      {/* Trigger */}
+      {/* Trigger — styled for the light nav bar under the dark header bar */}
       <button
         className={cn(
-          'flex items-center gap-1 rounded-full px-4 py-1 text-sm font-medium transition-all duration-200',
+          'flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-200',
           isActive
-            ? 'bg-primary/10 text-primary'
-            : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+            ? 'text-primary'
+            : 'text-foreground/80 hover:bg-muted hover:text-foreground'
         )}
       >
         {TriggerIcon && <TriggerIcon className="h-4 w-4" />}
         {displayLabel}
         <ChevronDown
-          className={cn('h-3 w-3 transition-transform duration-200', hovered && 'rotate-180')}
+          className={cn('h-3.5 w-3.5 transition-transform duration-200', hovered && 'rotate-180')}
         />
       </button>
 

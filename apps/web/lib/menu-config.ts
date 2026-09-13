@@ -59,6 +59,9 @@ export type MenuConfig = {
   mobileMenu: MenuItem[];
   /** Footer columns — array of { title, titleBn, items } */
   footerMenu: FooterColumn[];
+  /** Tagline shown under the footer logo. Empty = built-in default copy. */
+  footerTagline?: string;
+  footerTaglineBn?: string;
   /** Social links shown in footer */
   footerSocial: FooterSocialItem[];
   /** Payment method badges shown in footer bottom bar */
@@ -118,6 +121,10 @@ export const DEFAULT_MENU_CONFIG: MenuConfig = {
       ],
     },
   ],
+  footerTagline:
+    'Stay in the loop — get the latest deals, new arrivals, and exclusive offers straight to your inbox.',
+  footerTaglineBn:
+    'সর্বশেষ ডিল, নতুন পণ্য এবং একচেটিয়া অফার সম্পর্কে জানুন — সরাসরি আপনার ইনবক্সে।',
   footerSocial: [
     { platform: 'facebook', url: 'https://facebook.com' },
     { platform: 'youtube', url: 'https://youtube.com' },
@@ -139,6 +146,8 @@ export function mergeMenuConfig(saved?: Partial<MenuConfig> | null): MenuConfig 
     mainMenu: Array.isArray(saved.mainMenu) ? saved.mainMenu : DEFAULT_MENU_CONFIG.mainMenu,
     mobileMenu: Array.isArray(saved.mobileMenu) ? saved.mobileMenu : DEFAULT_MENU_CONFIG.mobileMenu,
     footerMenu: Array.isArray(saved.footerMenu) ? saved.footerMenu : DEFAULT_MENU_CONFIG.footerMenu,
+    footerTagline: saved.footerTagline ?? DEFAULT_MENU_CONFIG.footerTagline,
+    footerTaglineBn: saved.footerTaglineBn ?? DEFAULT_MENU_CONFIG.footerTaglineBn,
     footerSocial: Array.isArray(saved.footerSocial)
       ? saved.footerSocial
       : DEFAULT_MENU_CONFIG.footerSocial,

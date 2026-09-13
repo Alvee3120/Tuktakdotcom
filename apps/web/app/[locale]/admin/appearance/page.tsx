@@ -184,7 +184,6 @@ export default function AppearancePage() {
           { label: 'Sections', value: 'sections' },
           { label: 'Branding', value: 'branding' },
           { label: 'Card Style', value: 'cards' },
-          { label: 'Header & Hero', value: 'layout' },
           { label: 'Menu Editor', value: 'menu' },
           { label: 'News Ticker', value: 'ticker' },
         ]}
@@ -307,93 +306,6 @@ export default function AppearancePage() {
         </Card>
       )}
 
-      {/* ═══ Header & Hero ═══ */}
-      {tab === 'layout' && (
-        <Card
-          icon={LayoutTemplate}
-          title="Header & Hero Layout"
-          desc="Header bar and hero section style"
-        >
-          <div className="grid gap-4 sm:grid-cols-2 sm:gap-6">
-            <div className="space-y-2.5">
-              <p className="text-muted-foreground text-xs font-medium">Header Bar</p>
-              <div className="flex flex-col gap-2">
-                {(['floating', 'full'] as const).map((style) => {
-                  const opts = [
-                    {
-                      v: 'floating' as const,
-                      label: 'Floating',
-                      desc: 'Rounded, translucent, side margins',
-                    },
-                    { v: 'full' as const, label: 'Full-width', desc: 'Solid edge-to-edge bar' },
-                  ];
-                  const opt = opts.find((o) => o.v === style)!;
-                  const active = cfg.headerStyle === style;
-                  return (
-                    <button
-                      key={style}
-                      onClick={() => setCfg((prev) => ({ ...prev, headerStyle: style }))}
-                      className={cn(
-                        'border-border relative flex flex-col gap-1.5 rounded-md border p-2.5 text-left transition-all',
-                        active
-                          ? 'border-primary bg-primary/5'
-                          : 'hover:border-border hover:bg-muted/30'
-                      )}
-                    >
-                      <div className="h-5 w-full">
-                        <div
-                          className={cn(
-                            'border-primary/20 bg-primary/5 h-2.5 w-full border',
-                            style === 'floating' ? 'mx-3 my-0.5 rounded-full' : 'rounded-none'
-                          )}
-                        />
-                      </div>
-                      <p className="text-foreground text-xs font-medium">{opt.label}</p>
-                      <p className="text-muted-foreground text-[10px] leading-snug">{opt.desc}</p>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="space-y-2.5">
-              <p className="text-muted-foreground text-xs font-medium">Hero Section</p>
-              <div className="flex flex-col gap-2">
-                {(['boxed', 'full'] as const).map((style) => {
-                  const opts = [
-                    { v: 'boxed' as const, label: 'Boxed', desc: 'Centered card, side margins' },
-                    { v: 'full' as const, label: 'Full-bleed', desc: 'Edge-to-edge, taller' },
-                  ];
-                  const opt = opts.find((o) => o.v === style)!;
-                  const active = cfg.heroStyle === style;
-                  return (
-                    <button
-                      key={style}
-                      onClick={() => setCfg((prev) => ({ ...prev, heroStyle: style }))}
-                      className={cn(
-                        'border-border relative flex flex-col gap-1.5 rounded-md border p-2.5 text-left transition-all',
-                        active
-                          ? 'border-primary bg-primary/5'
-                          : 'hover:border-border hover:bg-muted/30'
-                      )}
-                    >
-                      <div className="h-5 w-full">
-                        {style === 'boxed' ? (
-                          <div className="bg-primary/10 border-primary/20 mx-3 my-0.5 h-2.5 w-1/2 rounded border" />
-                        ) : (
-                          <div className="bg-primary/10 border-primary/20 h-2.5 w-full rounded border" />
-                        )}
-                      </div>
-                      <p className="text-foreground text-xs font-medium">{opt.label}</p>
-                      <p className="text-muted-foreground text-[10px] leading-snug">{opt.desc}</p>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </Card>
-      )}
-
       {/* ═══ Menu Editor ═══ */}
       {tab === 'menu' && (
         <div className="space-y-4">
@@ -454,17 +366,52 @@ export default function AppearancePage() {
           )}
 
           {menuSubTab === 'footer' && (
-            <Card
-              icon={Columns3}
-              title="Footer Menu Columns"
-              desc="Manage footer link columns. Drag to reorder columns, expand to add/edit links inside each."
-            >
-              <FooterColumnEditor
-                columns={menuCfg.footerMenu}
-                onChange={(columns) => setMenuCfg((prev) => ({ ...prev, footerMenu: columns }))}
-                categoryOptions={categoryOptions}
-              />
-            </Card>
+            <div className="space-y-4">
+              <Card
+                icon={Columns3}
+                title="Footer Tagline"
+                desc="Text shown under the footer logo (English & Bengali)."
+              >
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label>Tagline (EN)</Label>
+                    <textarea
+                      value={menuCfg.footerTagline ?? ''}
+                      onChange={(e) =>
+                        setMenuCfg((prev) => ({ ...prev, footerTagline: e.target.value }))
+                      }
+                      rows={3}
+                      className={inputCls}
+                      placeholder="Stay in the loop — get the latest deals, new arrivals, and exclusive offers straight to your inbox."
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Tagline (BN)</Label>
+                    <textarea
+                      value={menuCfg.footerTaglineBn ?? ''}
+                      onChange={(e) =>
+                        setMenuCfg((prev) => ({ ...prev, footerTaglineBn: e.target.value }))
+                      }
+                      rows={3}
+                      className={inputCls}
+                      placeholder="সর্বশেষ ডিল, নতুন পণ্য এবং একচেটিয়া অফার সম্পর্কে জানুন"
+                    />
+                  </div>
+                </div>
+              </Card>
+
+              <Card
+                icon={Columns3}
+                title="Footer Menu Columns"
+                desc="Manage footer link columns. Drag to reorder columns, expand to add/edit links inside each."
+              >
+                <FooterColumnEditor
+                  columns={menuCfg.footerMenu}
+                  onChange={(columns) => setMenuCfg((prev) => ({ ...prev, footerMenu: columns }))}
+                  categoryOptions={categoryOptions}
+                />
+              </Card>
+            </div>
           )}
 
           {menuSubTab === 'social' && (

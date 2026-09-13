@@ -7,6 +7,7 @@ import type { Env } from '@/types/env';
 import type { AuthVariables } from '@/middleware/auth';
 import { createDb } from '@/db';
 import * as schema from '@/db/schema';
+import { toNum } from '@/lib/numbers';
 import { parsePagination } from '@/lib/pagination';
 
 /**
@@ -55,7 +56,7 @@ accountingRoutes.get('/expenses', async (c) => {
       .where(where),
   ]);
 
-  const total = countRow?.count ?? 0;
+  const total = toNum(countRow?.count);
   return c.json({
     success: true,
     data: rows,
@@ -64,7 +65,7 @@ accountingRoutes.get('/expenses', async (c) => {
       page,
       totalPages: Math.ceil(total / limit),
       limit,
-      totalAmount: sumRow?.total ?? 0,
+      totalAmount: toNum(sumRow?.total),
     },
   });
 });
@@ -138,7 +139,17 @@ accountingRoutes.get('/suppliers', async (c) => {
     .groupBy(schema.suppliers.id)
     .orderBy(desc(schema.suppliers.createdAt))
     .limit(1000);
-  return c.json({ success: true, data: rows });
+  return c.json({
+    success: true,
+    data: rows.map((row) => ({
+      ...row,
+      // SUM() arrives as a string — coerce so `due > 0` comparisons and
+      // client-side arithmetic behave.
+      totalPurchased: toNum(row.totalPurchased),
+      totalPaid: toNum(row.totalPaid),
+      due: toNum(row.due),
+    })),
+  });
 });
 
 accountingRoutes.post('/suppliers', zValidator('json', supplierSchema), async (c) => {
@@ -268,9 +279,15 @@ accountingRoutes.get('/pnl', async (c) => {
 
   const db = createDb();
   const soldStatuses = ['confirmed', 'processing', 'shipped', 'delivered'];
-  const soldStatusList = soldStatuses.map((s) => `'${s}'`).join(', ');
+  // Must go through sql.join: a plain interpolated string would be sent as ONE
+  // bind parameter, so `status IN ('a, b, c')` would match nothing and every
+  // figure in this report would silently read 0.
+  const soldStatusList = sql.join(
+    soldStatuses.map((s) => sql`${s}`),
+    sql`, `
+  );
 
-  const [salesResult, orderTotalsResult, expensesResult] = await Promise.all([
+  const [salesResult, orderTotalsResult, expensesResult, purchasesResult] = await Promise.all([
     // Revenue + COGS from line items
     db.execute(sql`
       SELECT
@@ -299,20 +316,167 @@ accountingRoutes.get('/pnl', async (c) => {
       GROUP BY category
       ORDER BY total DESC
     `),
+    // Inventory bought from suppliers. Only the amount actually PAID is a cost
+    // (cash out); the unpaid remainder is a liability (due), not an expense yet.
+    db.execute(sql`
+      SELECT
+        COALESCE(SUM(total_amount), 0) AS purchases,
+        COALESCE(SUM(paid_amount), 0) AS paid
+      FROM "purchase"
+      WHERE date >= ${fromDate} AND date <= ${toDate}
+    `),
   ]);
 
-  type SalesRow = { revenue: number; cogs: number; units_sold: number };
-  type OrderTotalsRow = { order_count: number; shipping_income: number; discounts_given: number };
-  type ExpenseRow = { category: string; total: number };
+  // `?detail=1` adds row-level data for the Excel export: a per-order P&L,
+  // per-product profitability and the purchase/dues ledger for the period.
+  const wantDetail = c.req.query('detail') === '1';
+  const [orderDetailResult, productDetailResult, purchaseDetailResult] = wantDetail
+    ? await Promise.all([
+        db.execute(sql`
+          SELECT
+            o.order_number,
+            o.created_at,
+            o.status,
+            COALESCE(u.name, o.guest_name, 'Guest') AS customer,
+            o.payment_method,
+            o.payment_status,
+            o.subtotal,
+            o.discount,
+            o.shipping_cost,
+            o.tax,
+            o.total,
+            COALESCE(items.units, 0) AS units,
+            COALESCE(items.revenue, 0) AS revenue,
+            COALESCE(items.cogs, 0) AS cogs
+          FROM "order" o
+          LEFT JOIN "user" u ON u.id = o.user_id
+          LEFT JOIN (
+            SELECT oi.order_id,
+                   SUM(oi.quantity) AS units,
+                   SUM(oi.price * oi.quantity) AS revenue,
+                   SUM(COALESCE(oi.cost, p.cost, 0) * oi.quantity) AS cogs
+            FROM "order_item" oi
+            JOIN "product" p ON p.id = oi.product_id
+            GROUP BY oi.order_id
+          ) items ON items.order_id = o.id
+          WHERE o.created_at >= ${fromStr} AND o.created_at <= ${toStr}
+            AND o.status IN (${soldStatusList})
+          ORDER BY o.created_at DESC
+          LIMIT 20000
+        `),
+        db.execute(sql`
+          SELECT
+            p.name,
+            p.sku,
+            SUM(oi.quantity) AS qty_sold,
+            SUM(oi.price * oi.quantity) AS revenue,
+            SUM(COALESCE(oi.cost, p.cost, 0) * oi.quantity) AS cogs
+          FROM "order_item" oi
+          JOIN "order" o ON o.id = oi.order_id
+          JOIN "product" p ON p.id = oi.product_id
+          WHERE o.created_at >= ${fromStr} AND o.created_at <= ${toStr}
+            AND o.status IN (${soldStatusList})
+          GROUP BY p.id, p.name, p.sku
+          ORDER BY revenue DESC
+        `),
+        db.execute(sql`
+          SELECT
+            s.name AS supplier,
+            pu.description,
+            pu.date,
+            pu.total_amount,
+            pu.paid_amount
+          FROM "purchase" pu
+          JOIN "supplier" s ON s.id = pu.supplier_id
+          WHERE pu.date >= ${fromDate} AND pu.date <= ${toDate}
+          ORDER BY pu.date DESC
+        `),
+      ])
+    : [null, null, null];
+
+  type SalesRow = { revenue: unknown; cogs: unknown; units_sold: unknown };
+  type OrderTotalsRow = { order_count: unknown; shipping_income: unknown; discounts_given: unknown };
+  type ExpenseRow = { category: string; total: unknown };
+  type PurchasesRow = { purchases: unknown; paid: unknown };
 
   const sales = (salesResult[0] ?? null) as SalesRow | null;
   const orderTotals = (orderTotalsResult[0] ?? null) as OrderTotalsRow | null;
-  const expenseRows = expensesResult as unknown as ExpenseRow[];
+  const purchasesRow = (purchasesResult[0] ?? null) as PurchasesRow | null;
+  const purchaseTotal = toNum(purchasesRow?.purchases);
+  const supplierPayments = toNum(purchasesRow?.paid);
 
-  const revenue = sales?.revenue ?? 0;
-  const cogs = sales?.cogs ?? 0;
+  // What was actually paid to suppliers is a cost; `purchaseTotal` is only
+  // reported so the UI can show bought vs paid vs still due.
+  const expenseRows: { category: string; total: number }[] = (
+    expensesResult as unknown as ExpenseRow[]
+  ).map((row) => ({
+    category: row.category,
+    total: toNum(row.total),
+  }));
+  if (supplierPayments > 0) {
+    expenseRows.push({ category: 'Supplier Payments', total: supplierPayments });
+    expenseRows.sort((a, b) => b.total - a.total);
+  }
+
+  const revenue = toNum(sales?.revenue);
+  const cogs = toNum(sales?.cogs);
   const grossProfit = revenue - cogs;
-  const totalExpenses = expenseRows.reduce((sum, row) => sum + (row.total ?? 0), 0);
+  const totalExpenses = expenseRows.reduce((sum, row) => sum + row.total, 0);
+
+  // Row-level detail for the workbook. Coerced here because the driver returns
+  // SUM() results as strings.
+  const orderRows = ((orderDetailResult ?? []) as unknown as Record<string, unknown>[]).map((r) => {
+    const orderRevenue = toNum(r.revenue);
+    const orderCogs = toNum(r.cogs);
+    return {
+      orderNumber: String(r.order_number ?? ''),
+      date: String(r.created_at ?? ''),
+      customer: String(r.customer ?? 'Guest'),
+      status: String(r.status ?? ''),
+      paymentMethod: (r.payment_method as string | null) ?? null,
+      paymentStatus: (r.payment_status as string | null) ?? null,
+      units: toNum(r.units),
+      revenue: orderRevenue,
+      cogs: orderCogs,
+      grossProfit: orderRevenue - orderCogs,
+      margin: orderRevenue > 0 ? ((orderRevenue - orderCogs) / orderRevenue) * 100 : 0,
+      shipping: toNum(r.shipping_cost),
+      discount: toNum(r.discount),
+      tax: toNum(r.tax),
+      total: toNum(r.total),
+    };
+  });
+
+  const productRows = ((productDetailResult ?? []) as unknown as Record<string, unknown>[]).map(
+    (r) => {
+      const productRevenue = toNum(r.revenue);
+      const productCogs = toNum(r.cogs);
+      return {
+        name: String(r.name ?? ''),
+        sku: (r.sku as string | null) ?? null,
+        qtySold: toNum(r.qty_sold),
+        revenue: productRevenue,
+        cogs: productCogs,
+        grossProfit: productRevenue - productCogs,
+        margin: productRevenue > 0 ? ((productRevenue - productCogs) / productRevenue) * 100 : 0,
+      };
+    }
+  );
+
+  const purchaseRows = ((purchaseDetailResult ?? []) as unknown as Record<string, unknown>[]).map(
+    (r) => {
+      const total = toNum(r.total_amount);
+      const paid = toNum(r.paid_amount);
+      return {
+        supplier: String(r.supplier ?? ''),
+        description: (r.description as string | null) ?? null,
+        date: String(r.date ?? ''),
+        total,
+        paid,
+        due: total - paid,
+      };
+    }
+  );
 
   return c.json({
     success: true,
@@ -320,13 +484,18 @@ accountingRoutes.get('/pnl', async (c) => {
       revenue,
       cogs,
       grossProfit,
-      shippingIncome: orderTotals?.shipping_income ?? 0,
-      discountsGiven: orderTotals?.discounts_given ?? 0,
+      shippingIncome: toNum(orderTotals?.shipping_income),
+      discountsGiven: toNum(orderTotals?.discounts_given),
       expensesByCategory: expenseRows,
       totalExpenses,
+      // `supplierPayments` is already inside totalExpenses (deducted).
+      // `purchaseTotal` is informational — goods bought, paid or not.
+      purchaseTotal,
+      supplierPayments,
       netProfit: grossProfit - totalExpenses,
-      orderCount: orderTotals?.order_count ?? 0,
-      unitsSold: sales?.units_sold ?? 0,
+      orderCount: toNum(orderTotals?.order_count),
+      unitsSold: toNum(sales?.units_sold),
+      ...(wantDetail ? { orderRows, productRows, purchaseRows } : {}),
       range: { from: from ?? null, to: to ?? null },
     },
   });

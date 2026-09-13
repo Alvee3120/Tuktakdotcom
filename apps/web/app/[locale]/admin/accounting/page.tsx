@@ -29,8 +29,10 @@ import {
   useUpdatePurchase,
   usePnl,
   type Expense,
+  type PnlReport,
   type Supplier,
 } from '@/hooks/useAdmin';
+import { api } from '@/lib/api-client';
 import { exportPnlToXlsx } from '@/lib/export-excel';
 import { cn, formatPrice } from '@/lib/utils';
 
@@ -104,7 +106,13 @@ export default function AdminAccountingPage() {
     if (!pnl) return;
     setExporting(true);
     try {
-      await exportPnlToXlsx(pnl, expenses, range);
+      // Re-fetch with `detail=1` so the workbook gets the row-level sheets
+      // (per-order P&L, product profitability, purchase ledger).
+      const detailed = await api.get<{ success: boolean; data: PnlReport }>(
+        '/api/admin/accounting/pnl',
+        { params: { from: range.from, to: range.to, detail: 1 } }
+      );
+      await exportPnlToXlsx(detailed.data, expenses, range);
       toast.success('Excel file downloaded');
     } catch {
       toast.error('Export failed');
@@ -196,7 +204,7 @@ export default function AdminAccountingPage() {
           </div>
         ) : pnl ? (
           <>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
               <PnlCard
                 label={`Revenue (${pnl.orderCount} orders)`}
                 value={formatPrice(pnl.revenue)}
@@ -207,7 +215,26 @@ export default function AdminAccountingPage() {
                 value={formatPrice(pnl.grossProfit)}
                 tone={pnl.grossProfit >= 0 ? 'positive' : 'negative'}
               />
-              <PnlCard label="Expenses" value={formatPrice(pnl.totalExpenses)} />
+              <PnlCard
+                label="Expenses"
+                value={formatPrice(pnl.totalExpenses)}
+                hint={
+                  pnl.supplierPayments > 0
+                    ? `incl. ${formatPrice(pnl.supplierPayments)} supplier payments`
+                    : undefined
+                }
+              />
+              <PnlCard
+                label="Supplier Purchases"
+                value={formatPrice(pnl.purchaseTotal)}
+                hint={
+                  pnl.purchaseTotal > 0
+                    ? `${formatPrice(pnl.supplierPayments)} paid · ${formatPrice(
+                        Math.max(0, pnl.purchaseTotal - pnl.supplierPayments)
+                      )} due`
+                    : undefined
+                }
+              />
               <PnlCard
                 label="Net Profit"
                 value={formatPrice(pnl.netProfit)}
@@ -215,7 +242,7 @@ export default function AdminAccountingPage() {
                 emphasize
               />
             </div>
-            <div className="text-muted-foreground grid gap-3 text-xs sm:grid-cols-3">
+            <div className="text-muted-foreground grid gap-3 text-xs sm:grid-cols-4">
               <p>
                 Units sold:{' '}
                 <span className="text-foreground font-semibold">
@@ -232,6 +259,12 @@ export default function AdminAccountingPage() {
                 Discounts given:{' '}
                 <span className="text-foreground font-semibold">
                   {formatPrice(pnl.discountsGiven)}
+                </span>
+              </p>
+              <p>
+                Paid to suppliers:{' '}
+                <span className="text-foreground font-semibold">
+                  {formatPrice(pnl.supplierPayments)}
                 </span>
               </p>
             </div>
@@ -283,11 +316,13 @@ function PnlCard({
   value,
   tone,
   emphasize,
+  hint,
 }: {
   label: string;
   value: string;
   tone?: 'positive' | 'negative';
   emphasize?: boolean;
+  hint?: string;
 }) {
   return (
     <div
@@ -307,6 +342,7 @@ function PnlCard({
       >
         {value}
       </p>
+      {hint && <p className="text-muted-foreground/70 mt-0.5 text-[10px]">{hint}</p>}
     </div>
   );
 }

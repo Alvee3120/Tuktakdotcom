@@ -2,13 +2,15 @@
 
 import { Search, Eye, Package, Edit3, X, ChevronDown } from 'lucide-react';
 import Image from 'next/image';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 import { AreaChart } from '@/components/dashboard/AreaChart';
+import { periodAxisLabels } from '@/components/dashboard/chart-labels';
 import { OrderDetailDrawer } from '@/components/dashboard/OrderDetailDrawer';
 import { Pagination } from '@/components/dashboard/Pagination';
+import { PeriodFilter } from '@/components/dashboard/PeriodFilter';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { TabFilter } from '@/components/dashboard/TabFilter';
 import {
@@ -18,7 +20,12 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { UserAvatar } from '@/components/ui/UserAvatar';
-import { useAdminOrders, useUpdateOrderStatus, useDashboardStats } from '@/hooks/useAdmin';
+import {
+  useAdminOrders,
+  useUpdateOrderStatus,
+  useDashboardStats,
+  type DashboardPeriod,
+} from '@/hooks/useAdmin';
 import { formatPrice } from '@/lib/utils';
 
 const statusStyles: Record<string, { bg: string; text: string; dot: string }> = {
@@ -77,7 +84,11 @@ const tabDefs = [
 export default function OrderManagementPage() {
   const tc = useTranslations('admin.common');
   const tst = useTranslations('admin.status');
+  const td = useTranslations('admin.dashboard');
+  const locale = useLocale();
   const [activeTab, setActiveTab] = useState('all');
+  // Order management is a working list, so it opens on every order by default.
+  const [period, setPeriod] = useState<DashboardPeriod>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -93,22 +104,29 @@ export default function OrderManagementPage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  const { data: statsData } = useDashboardStats();
+  const { data: statsData } = useDashboardStats(period);
   const stats = statsData?.data;
-  const weeklySeries = stats?.weeklySeries ?? [];
-  const weeklyData = weeklySeries.map((d) => d.revenue);
-  const weeklyLabels = weeklySeries.map((d) =>
-    new Date(`${d.day}T00:00:00Z`).toLocaleDateString('en-US', {
-      weekday: 'short',
-      timeZone: 'UTC',
-    })
+  const series = stats?.series ?? [];
+  const weeklyData = series.map((d) => d.revenue);
+  const weeklyLabels = periodAxisLabels(
+    series.map((d) => d.bucket),
+    period,
+    locale
   );
   const { data, isLoading, isError, error, refetch } = useAdminOrders({
     page: currentPage,
     status: activeTab !== 'all' ? activeTab : undefined,
     search: debouncedSearch,
+    period,
   });
   const updateStatus = useUpdateOrderStatus();
+
+  const periodLabel = {
+    '24h': tc('last24Hours'),
+    '7d': tc('last7Days'),
+    '30d': tc('last30Days'),
+    all: tc('allTime'),
+  }[period];
 
   const orders = data?.data ?? [];
   const meta = data?.meta;
@@ -139,17 +157,17 @@ export default function OrderManagementPage() {
           <StatCard
             title="Total Orders"
             value={stats?.totalOrders?.toLocaleString() ?? '0'}
-            percentageLabel="all time"
+            percentageLabel={periodLabel}
           />
           <StatCard
             title="Total Revenue"
             value={formatPrice(stats?.totalRevenue ?? 0)}
-            percentageLabel="delivered"
+            percentageLabel={periodLabel}
           />
           <StatCard
             title="Total Customers"
             value={stats?.totalUsers?.toLocaleString() ?? '0'}
-            percentageLabel="all time"
+            percentageLabel={tc('allTime')}
           />
           <StatCard
             title="Active Products"
@@ -162,28 +180,37 @@ export default function OrderManagementPage() {
         <div className="border-border bg-card rounded-xl border p-4 shadow-sm">
           <div className="mb-2 flex items-center justify-between">
             <div>
-              <h3 className="text-foreground text-sm font-semibold">Report This Week</h3>
-              <p className="text-muted-foreground/70 text-[11px]">Order revenue overview</p>
+              <h3 className="text-foreground text-sm font-semibold">{td('salesOverview')}</h3>
+              <p className="text-muted-foreground/70 text-[11px]">{periodLabel}</p>
             </div>
           </div>
           {weeklyData.some((v) => v > 0) ? (
             <AreaChart data={weeklyData} labels={weeklyLabels} height={120} maxHeight={120} />
           ) : (
-            <p className="text-muted-foreground/70 py-8 text-center text-xs">No sales this week</p>
+            <p className="text-muted-foreground/70 py-8 text-center text-xs">No sales in this period</p>
           )}
         </div>
       </div>
 
       {/* Filters row */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <TabFilter
-          tabs={tabs}
-          activeTab={activeTab}
-          onTabChange={(v) => {
-            setActiveTab(v);
-            setCurrentPage(1);
-          }}
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          <TabFilter
+            tabs={tabs}
+            activeTab={activeTab}
+            onTabChange={(v) => {
+              setActiveTab(v);
+              setCurrentPage(1);
+            }}
+          />
+          <PeriodFilter
+            value={period}
+            onChange={(p) => {
+              setPeriod(p);
+              setCurrentPage(1);
+            }}
+          />
+        </div>
         <div className="flex items-center gap-2">
           <div className="relative">
             <Search className="text-muted-foreground/70 absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />

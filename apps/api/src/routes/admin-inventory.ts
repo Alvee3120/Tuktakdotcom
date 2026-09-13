@@ -8,6 +8,7 @@ import type { AuthVariables } from '@/middleware/auth';
 import { createDb } from '@/db';
 import * as schema from '@/db/schema';
 import { indexBy } from '@/lib/collections';
+import { toNum } from '@/lib/numbers';
 import { parsePagination } from '@/lib/pagination';
 
 /**
@@ -86,10 +87,11 @@ export async function applyProductAllocations(
   });
 
   // product.stock stays the total across all inventories.
-  const [{ total }] = await db
+  const [{ total: totalRaw }] = await db
     .select({ total: sql<number>`COALESCE(SUM(${schema.inventoryStock.quantity}), 0)` })
     .from(schema.inventoryStock)
     .where(eq(schema.inventoryStock.productId, productId));
+  const total = toNum(totalRaw);
   await db
     .update(schema.products)
     .set({ stock: total, updatedAt: now })
@@ -116,7 +118,16 @@ inventoryRoutes.get('/', async (c) => {
     .leftJoin(schema.inventoryStock, eq(schema.inventoryStock.inventoryId, schema.inventories.id))
     .groupBy(schema.inventories.id)
     .orderBy(desc(schema.inventories.createdAt));
-  return c.json({ success: true, data: rows });
+  return c.json({
+    success: true,
+    data: rows.map((row) => ({
+      ...row,
+      // Aggregates arrive as strings — the client sums these, and `+` on
+      // strings concatenates instead of adding.
+      skuCount: toNum(row.skuCount),
+      totalUnits: toNum(row.totalUnits),
+    })),
+  });
 });
 
 // ── Create inventory ──
@@ -216,10 +227,10 @@ inventoryRoutes.get('/:id/stock', async (c) => {
       .where(where),
   ]);
 
-  const total = countRow?.count ?? 0;
+  const total = toNum(countRow?.count);
   return c.json({
     success: true,
-    data: rows,
+    data: rows.map((row) => ({ ...row, quantity: toNum(row.quantity) })),
     meta: { total, page, totalPages: Math.ceil(total / limit), limit },
   });
 });
@@ -239,7 +250,13 @@ inventoryRoutes.get('/:id/report', async (c) => {
 
   // Sold = orders that are confirmed or beyond (excludes pending/cancelled/refunded)
   const soldStatuses = ['confirmed', 'processing', 'shipped', 'delivered'];
-  const soldStatusList = soldStatuses.map((s) => `'${s}'`).join(', ');
+  // Must go through sql.join: a plain interpolated string would be sent as ONE
+  // bind parameter, so `status IN ('a, b, c')` would match nothing and the
+  // report would silently show zero sales.
+  const soldStatusList = sql.join(
+    soldStatuses.map((s) => sql`${s}`),
+    sql`, `
+  );
 
   const salesQuery = db.execute(sql`
     SELECT
@@ -280,6 +297,48 @@ inventoryRoutes.get('/:id/report', async (c) => {
     perProductStockQuery,
   ]);
 
+  // `?detail=1` additionally returns row-level data for the Excel export:
+  // every sale line in the period, and per-product stock on hand.
+  const wantDetail = c.req.query('detail') === '1';
+  const scope = all ? sql`` : sql`AND oi.inventory_id = ${id}`;
+  const [salesDetailResult, stockDetailResult] = wantDetail
+    ? await Promise.all([
+        db.execute(sql`
+          SELECT
+            o.created_at,
+            o.order_number,
+            o.status,
+            COALESCE(u.name, o.guest_name, 'Guest') AS customer,
+            p.name AS product_name,
+            p.sku,
+            oi.quantity,
+            oi.price AS unit_price,
+            COALESCE(oi.cost, p.cost, 0) AS unit_cost,
+            oi.price * oi.quantity AS revenue,
+            COALESCE(oi.cost, p.cost, 0) * oi.quantity AS cost,
+            oi.price * oi.quantity - COALESCE(oi.cost, p.cost, 0) * oi.quantity AS profit
+          FROM "order_item" oi
+          JOIN "order" o ON o.id = oi.order_id
+          JOIN "product" p ON p.id = oi.product_id
+          LEFT JOIN "user" u ON u.id = o.user_id
+          WHERE o.created_at >= ${fromStr} AND o.created_at <= ${toStr}
+            AND o.status IN (${soldStatusList})
+            ${scope}
+          ORDER BY o.created_at DESC, o.order_number
+          LIMIT 20000
+        `),
+        db.execute(sql`
+          SELECT p.name, p.sku, COALESCE(SUM(s.quantity), 0) AS quantity, p.cost AS unit_cost,
+                 p.low_stock_threshold
+          FROM "inventory_stock" s
+          JOIN "product" p ON p.id = s.product_id
+          ${all ? sql`` : sql`WHERE s.inventory_id = ${id}`}
+          GROUP BY p.id, p.name, p.sku, p.cost, p.low_stock_threshold
+          ORDER BY p.name
+        `),
+      ])
+    : [null, null];
+
   type SalesRow = {
     product_id: string;
     name: string;
@@ -303,13 +362,57 @@ inventoryRoutes.get('/:id/report', async (c) => {
 
   const rows = sales.map((r) => ({
     ...r,
-    current_stock: stockMap.get(r.product_id)?.qty ?? 0,
+    // SUM() over an integer column comes back as a string from the driver, so
+    // coerce before any arithmetic (a raw `+` would concatenate digits).
+    revenue: toNum(r.revenue),
+    cost_total: toNum(r.cost_total),
+    qty_sold: toNum(r.qty_sold),
+    profit: toNum(r.profit),
+    current_stock: toNum(stockMap.get(r.product_id)?.qty),
   }));
 
-  const totalRevenue = rows.reduce((s, r) => s + (r.revenue ?? 0), 0);
-  const totalCost = rows.reduce((s, r) => s + (r.cost_total ?? 0), 0);
-  const unitsSold = rows.reduce((s, r) => s + (r.qty_sold ?? 0), 0);
+  const totalRevenue = rows.reduce((s, r) => s + r.revenue, 0);
+  const totalCost = rows.reduce((s, r) => s + r.cost_total, 0);
+  const unitsSold = rows.reduce((s, r) => s + r.qty_sold, 0);
   const profit = totalRevenue - totalCost;
+
+  // Coerce the row-level detail (billed as strings by the driver) so the
+  // workbook can compute margins and totals without concatenating digits.
+  const salesDetail = ((salesDetailResult ?? []) as unknown as Record<string, unknown>[]).map(
+    (r) => {
+      const revenue = toNum(r.revenue);
+      const cost = toNum(r.cost);
+      return {
+        date: String(r.created_at ?? ''),
+        orderNumber: String(r.order_number ?? ''),
+        status: String(r.status ?? ''),
+        customer: String(r.customer ?? 'Guest'),
+        productName: String(r.product_name ?? ''),
+        sku: (r.sku as string | null) ?? null,
+        quantity: toNum(r.quantity),
+        unitPrice: toNum(r.unit_price),
+        unitCost: toNum(r.unit_cost),
+        revenue,
+        cost,
+        profit: revenue - cost,
+      };
+    }
+  );
+
+  const stockRows = ((stockDetailResult ?? []) as unknown as Record<string, unknown>[]).map((r) => {
+    const quantity = toNum(r.quantity);
+    const unitCost = toNum(r.unit_cost);
+    const threshold = toNum(r.low_stock_threshold);
+    return {
+      name: String(r.name ?? ''),
+      sku: (r.sku as string | null) ?? null,
+      quantity,
+      unitCost,
+      stockValue: quantity * unitCost,
+      // Mirrors the admin UI's badges so the sheet is self-explanatory.
+      status: quantity <= 0 ? 'Out of Stock' : quantity <= threshold ? 'Low Stock' : 'In Stock',
+    };
+  });
 
   return c.json({
     success: true,
@@ -320,10 +423,11 @@ inventoryRoutes.get('/:id/report', async (c) => {
         cost: totalCost,
         profit,
         margin: totalRevenue > 0 ? (profit / totalRevenue) * 100 : 0,
-        stock_units: stock?.units ?? 0,
-        stock_value: stock?.value ?? 0,
+        stock_units: Number(stock?.units ?? 0),
+        stock_value: Number(stock?.value ?? 0),
       },
       rows,
+      ...(wantDetail ? { salesDetail, stockRows } : {}),
       range: { from: from ?? null, to: to ?? null },
       inventoryId: id,
     },

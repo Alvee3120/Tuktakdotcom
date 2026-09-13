@@ -10,10 +10,13 @@ export const paginationSchema = z.object({
 export const productListSchema = paginationSchema.extend({
   search: z.string().min(1).max(200).optional(),
   category: z.string().optional(),
+  // Include products from child categories of `category` (e.g. Smartphones →
+  // Android Phones + iPhones)
+  includeDescendants: z.coerce.boolean().optional(),
   brand: z.string().optional(),
   minPrice: z.coerce.number().int().min(0).optional(),
   maxPrice: z.coerce.number().int().min(0).optional(),
-  sort: z.enum(['newest', 'price_asc', 'price_desc', 'rating']).default('newest'),
+  sort: z.enum(['newest', 'price_asc', 'price_desc', 'rating', 'best_selling']).default('newest'),
   featured: z.coerce.boolean().optional(),
   // Comma-separated product IDs (used by manually-picked home sections)
   ids: z.string().max(2000).optional(),

@@ -16,7 +16,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
 
-import { Container, Section } from '@/components/shared/Layout';
+import { AccountShell } from '@/components/account/AccountShell';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -125,141 +125,135 @@ export default function TrackingPage() {
   }, [orderParam, t]);
 
   return (
-    <Section>
-      <Container>
-        {/* Header */}
-        <div className="mb-8 text-center">
-          <div className="bg-primary/10 mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full">
-            <Package className="text-primary h-7 w-7" />
-          </div>
-          <h1 className="text-display-2xl text-foreground font-bold">{t('title')}</h1>
-          <p className="text-body text-muted-foreground mt-1">{t('enterOrderId')}</p>
+    <AccountShell>
+      {/* Header */}
+      <div className="mb-8 text-center">
+        <div className="bg-primary/10 mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full">
+          <Package className="text-primary h-7 w-7" />
         </div>
+        <h1 className="text-display-2xl text-foreground font-bold">{t('title')}</h1>
+        <p className="text-body text-muted-foreground mt-1">{t('enterOrderId')}</p>
+      </div>
 
-        {/* Order placed — success banner (query ?placed=1) */}
-        {placed && (
-          <div className="mx-auto mb-8 max-w-md rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-center">
-            <PartyPopper className="mx-auto mb-2 h-6 w-6 text-emerald-500" />
-            <p className="text-body-sm font-semibold text-emerald-600 dark:text-emerald-400">
-              {t('orderPlaced')}
-            </p>
-            <p className="text-body-sm text-muted-foreground mt-1">
-              {t('orderPlacedDetail', { number: trackingData?.orderNumber ?? orderParam })}
-            </p>
+      {/* Order placed — success banner (query ?placed=1) */}
+      {placed && (
+        <div className="mx-auto mb-8 max-w-md rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-center">
+          <PartyPopper className="mx-auto mb-2 h-6 w-6 text-emerald-500" />
+          <p className="text-body-sm font-semibold text-emerald-600 dark:text-emerald-400">
+            {t('orderPlaced')}
+          </p>
+          <p className="text-body-sm text-muted-foreground mt-1">
+            {t('orderPlacedDetail', { number: trackingData?.orderNumber ?? orderParam })}
+          </p>
+        </div>
+      )}
+
+      {/* Search Input */}
+      <div className="mx-auto mb-10 max-w-md">
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="text-muted-foreground absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
+            <Input
+              value={orderId}
+              onChange={(e) => setOrderId(e.target.value)}
+              placeholder={t('orderId')}
+              className="pl-9"
+              onKeyDown={(e) => e.key === 'Enter' && handleTrack()}
+            />
           </div>
-        )}
+          <PremiumButton variant="primary" onClick={handleTrack} disabled={!orderId.trim() || loading}>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : t('trackButton')}
+          </PremiumButton>
+        </div>
+      </div>
 
-        {/* Search Input */}
-        <div className="mx-auto mb-10 max-w-md">
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Search className="text-muted-foreground absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
-              <Input
-                value={orderId}
-                onChange={(e) => setOrderId(e.target.value)}
-                placeholder={t('orderId')}
-                className="pl-9"
-                onKeyDown={(e) => e.key === 'Enter' && handleTrack()}
-              />
+      {/* Error */}
+      {error && (
+        <div className="border-destructive/20 bg-destructive/5 mx-auto max-w-md rounded-lg border p-4 text-center">
+          <p className="text-body-sm text-destructive">{error}</p>
+        </div>
+      )}
+
+      {/* Tracking Result */}
+      {trackingData && (
+        <div className="mx-auto max-w-2xl space-y-6">
+          {/* Order Info Card */}
+          <Card className="p-6">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-caption text-muted-foreground">{t('orderId')}</p>
+                <p className="text-body break-all font-mono font-semibold">
+                  {trackingData.orderNumber}
+                </p>
+              </div>
+              <OrderStatusBadge status={trackingData.status} />
             </div>
-            <PremiumButton
-              variant="primary"
-              onClick={handleTrack}
-              disabled={!orderId.trim() || loading}
+            <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3">
+              <div>
+                <p className="text-caption text-muted-foreground">Total</p>
+                <p className="text-body-sm font-semibold">{formatPrice(trackingData.total)}</p>
+              </div>
+              <div>
+                <p className="text-caption text-muted-foreground">Payment</p>
+                <p className="text-body-sm font-semibold">
+                  {PAYMENT_LABELS[trackingData.paymentMethod] ?? trackingData.paymentMethod}
+                </p>
+              </div>
+              <div>
+                <p className="text-caption text-muted-foreground">{t('orderDate')}</p>
+                <p className="text-body-sm font-semibold">
+                  {new Date(trackingData.createdAt).toLocaleDateString()}
+                </p>
+              </div>
+            </div>
+          </Card>
+
+          {/* Status Timeline */}
+          {trackingData.status !== 'cancelled' && trackingData.status !== 'refunded' && (
+            <Card className="p-6">
+              <h2 className="text-body-lg text-foreground mb-6 font-semibold">{t('timeline')}</h2>
+              <OrderTimeline currentStatus={trackingData.status} />
+            </Card>
+          )}
+
+          {/* Items */}
+          <Card className="p-6">
+            <h2 className="text-body-sm text-foreground mb-4 font-semibold">Order Items</h2>
+            <div className="space-y-2">
+              {trackingData.items.map((item, i) => (
+                <div key={i} className="text-body-sm flex justify-between">
+                  <span className="text-foreground/80">
+                    {item.name} × {item.quantity}
+                  </span>
+                  <span className="font-medium">{formatPrice(item.price * item.quantity)}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* Shipping Address */}
+          {trackingData.shippingAddress && (
+            <Card className="p-6">
+              <h2 className="text-body-sm text-foreground mb-2 font-semibold">Delivery Address</h2>
+              <p className="text-body-sm text-foreground/80">{trackingData.shippingAddress}</p>
+            </Card>
+          )}
+
+          <div className="text-center">
+            <button
+              onClick={() => {
+                setTrackingData(null);
+                setOrderId('');
+                router.push('/tracking');
+              }}
+              className="text-body-sm text-primary font-medium hover:underline"
             >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : t('trackButton')}
-            </PremiumButton>
+              {t('trackAnother')}
+            </button>
           </div>
         </div>
-
-        {/* Error */}
-        {error && (
-          <div className="border-destructive/20 bg-destructive/5 mx-auto max-w-md rounded-lg border p-4 text-center">
-            <p className="text-body-sm text-destructive">{error}</p>
-          </div>
-        )}
-
-        {/* Tracking Result */}
-        {trackingData && (
-          <div className="mx-auto max-w-2xl space-y-6">
-            {/* Order Info Card */}
-            <Card className="p-6">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-caption text-muted-foreground">{t('orderId')}</p>
-                  <p className="text-body break-all font-mono font-semibold">{trackingData.orderNumber}</p>
-                </div>
-                <OrderStatusBadge status={trackingData.status} />
-              </div>
-              <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3">
-                <div>
-                  <p className="text-caption text-muted-foreground">Total</p>
-                  <p className="text-body-sm font-semibold">{formatPrice(trackingData.total)}</p>
-                </div>
-                <div>
-                  <p className="text-caption text-muted-foreground">Payment</p>
-                  <p className="text-body-sm font-semibold">
-                    {PAYMENT_LABELS[trackingData.paymentMethod] ?? trackingData.paymentMethod}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-caption text-muted-foreground">{t('orderDate')}</p>
-                  <p className="text-body-sm font-semibold">
-                    {new Date(trackingData.createdAt).toLocaleDateString()}
-                  </p>
-                </div>
-              </div>
-            </Card>
-
-            {/* Status Timeline */}
-            {trackingData.status !== 'cancelled' && trackingData.status !== 'refunded' && (
-              <Card className="p-6">
-                <h2 className="text-body-lg text-foreground mb-6 font-semibold">{t('timeline')}</h2>
-                <OrderTimeline currentStatus={trackingData.status} />
-              </Card>
-            )}
-
-            {/* Items */}
-            <Card className="p-6">
-              <h2 className="text-body-sm text-foreground mb-4 font-semibold">Order Items</h2>
-              <div className="space-y-2">
-                {trackingData.items.map((item, i) => (
-                  <div key={i} className="text-body-sm flex justify-between">
-                    <span className="text-foreground/80">
-                      {item.name} × {item.quantity}
-                    </span>
-                    <span className="font-medium">{formatPrice(item.price * item.quantity)}</span>
-                  </div>
-                ))}
-              </div>
-            </Card>
-
-            {/* Shipping Address */}
-            {trackingData.shippingAddress && (
-              <Card className="p-6">
-                <h2 className="text-body-sm text-foreground mb-2 font-semibold">
-                  Delivery Address
-                </h2>
-                <p className="text-body-sm text-foreground/80">{trackingData.shippingAddress}</p>
-              </Card>
-            )}
-
-            <div className="text-center">
-              <button
-                onClick={() => {
-                  setTrackingData(null);
-                  setOrderId('');
-                  router.push('/tracking');
-                }}
-                className="text-body-sm text-primary font-medium hover:underline"
-              >
-                {t('trackAnother')}
-              </button>
-            </div>
-          </div>
-        )}
-      </Container>
-    </Section>
+      )}
+    </AccountShell>
   );
 }
 

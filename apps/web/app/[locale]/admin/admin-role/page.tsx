@@ -3,7 +3,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 
 import { UserAvatar } from '@/components/ui/UserAvatar';
@@ -18,6 +18,8 @@ export default function AdminRolePage() {
 
   // Profile form
   const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [emailPassword, setEmailPassword] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
 
   // Password form
@@ -29,26 +31,54 @@ export default function AdminRolePage() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
 
-  useEffect(() => {
-    if (user) setName(user.name);
-  }, [user]);
+  // Seed the form once per user. Adjusted during render (the React-recommended
+  // alternative to a syncing effect) and keyed on the id so a session refetch
+  // can't clobber what the admin is typing.
+  const [syncedUserId, setSyncedUserId] = useState<string | null>(null);
+  if (user && user.id !== syncedUserId) {
+    setSyncedUserId(user.id);
+    setName(user.name);
+    setEmail(user.email);
+  }
+
+  const emailChanged = email.trim().toLowerCase() !== (user?.email ?? '').toLowerCase();
+  const profileDirty = name.trim() !== user?.name || emailChanged;
 
   const handleProfileSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || name.trim() === user?.name) return;
+    if (!profileDirty) return;
+    if (emailChanged && !emailPassword) {
+      toast.error(t('passwordRequiredForEmail'));
+      return;
+    }
     setSavingProfile(true);
     try {
-      const res = await fetch('/api/auth/update-user', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ name: name.trim() }),
-      });
-      if (!res.ok) throw new Error('update failed');
+      if (name.trim() && name.trim() !== user?.name) {
+        const res = await fetch('/api/auth/update-user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ name: name.trim() }),
+        });
+        if (!res.ok) throw new Error('update failed');
+      }
+      if (emailChanged) {
+        const res = await fetch('/api/admin/me/email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ newEmail: email.trim(), currentPassword: emailPassword }),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(body?.error ?? t('profileUpdateFailed'));
+        }
+        setEmailPassword('');
+      }
       await queryClient.invalidateQueries({ queryKey: ['auth', 'session'] });
       toast.success(t('profileUpdated'));
-    } catch {
-      toast.error(t('profileUpdateFailed'));
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : t('profileUpdateFailed'));
     } finally {
       setSavingProfile(false);
     }
@@ -243,12 +273,28 @@ export default function AdminRolePage() {
               </label>
               <input
                 type="email"
-                value={user.email}
-                disabled
-                className={`${inputClass} cursor-not-allowed opacity-60`}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                className={inputClass}
               />
               <p className="text-muted-foreground/70 mt-1 text-xs">{t('emailNote')}</p>
             </div>
+            {emailChanged && (
+              <div>
+                <label className="text-foreground mb-1.5 block text-sm font-medium">
+                  {t('currentPassword')}
+                </label>
+                <input
+                  type="password"
+                  value={emailPassword}
+                  onChange={(e) => setEmailPassword(e.target.value)}
+                  placeholder={t('confirmEmailPassword')}
+                  autoComplete="current-password"
+                  className={inputClass}
+                />
+              </div>
+            )}
             <div>
               <label className="text-foreground mb-1.5 block text-sm font-medium">
                 {t('role')}
@@ -262,7 +308,7 @@ export default function AdminRolePage() {
             </div>
             <button
               type="submit"
-              disabled={savingProfile || !name.trim() || name.trim() === user.name}
+              disabled={savingProfile || !profileDirty}
               className="rounded-lg bg-emerald-500 px-6 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-600 disabled:opacity-60"
             >
               {savingProfile ? tc('saving') : t('saveChange')}

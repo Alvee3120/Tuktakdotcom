@@ -1,8 +1,8 @@
 import { useSyncExternalStore } from 'react';
+import { toast } from 'sonner';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-import { toast } from 'sonner';
 
 import { MAX_CART_ITEMS, MAX_QUANTITY_PER_ITEM } from '@/lib/constants';
 import { trackAddToCart } from '@/lib/tracking';
@@ -106,6 +106,15 @@ export function useCartCount(): number {
   return useSyncExternalStore(
     useCartStore.subscribe,
     () => useCartStore.getState().items.reduce((sum, i) => sum + i.quantity, 0),
+    () => 0
+  );
+}
+
+/** Hydration-safe cart subtotal — same reasoning as `useCartCount`. */
+export function useCartTotal(): number {
+  return useSyncExternalStore(
+    useCartStore.subscribe,
+    () => useCartStore.getState().items.reduce((sum, i) => sum + i.price * i.quantity, 0),
     () => 0
   );
 }

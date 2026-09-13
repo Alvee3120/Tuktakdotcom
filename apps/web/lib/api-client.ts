@@ -132,10 +132,38 @@ class ApiClient {
     return this.handleResponse<T>(res);
   }
 
+  /**
+   * Turn an API error body into a human-readable message. Error payloads are
+   * not always plain strings: Hono's zValidator returns `error: { issues: [...] }`
+   * for schema failures, and stringifying that into an Error yields the useless
+   * "[object Object]".
+   */
+  private static errorMessage(body: unknown, status: number): string {
+    if (typeof body === 'string' && body) return body;
+    if (body && typeof body === 'object') {
+      const { error, message } = body as { error?: unknown; message?: unknown };
+      if (typeof error === 'string' && error) return error;
+      if (typeof message === 'string' && message) return message;
+      // Zod-style validation error: surface the first issue's message
+      const issues =
+        error && typeof error === 'object' && Array.isArray((error as { issues?: unknown }).issues)
+          ? ((error as { issues: unknown[] }).issues ?? [])
+          : Array.isArray(error)
+            ? error
+            : [];
+      const first = issues.find(
+        (i): i is { message: string } =>
+          !!i && typeof i === 'object' && typeof (i as { message?: unknown }).message === 'string'
+      );
+      if (first) return first.message;
+    }
+    return `HTTP ${status}`;
+  }
+
   private async handleResponse<T>(res: Response): Promise<T> {
     if (!res.ok) {
-      const error = await res.json().catch(() => ({ error: 'Unknown error' }));
-      const err = new Error(error.error ?? error.message ?? `HTTP ${res.status}`);
+      const body = await res.json().catch(() => null);
+      const err = new Error(ApiClient.errorMessage(body, res.status));
       (err as Error & { status: number }).status = res.status;
       throw err;
     }

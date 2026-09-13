@@ -36,10 +36,12 @@ export default async function StoreLayout({
 
   return (
     <TooltipProvider>
-      <div className="flex min-h-screen flex-col overflow-x-hidden" style={brandStyle}>
+      {/* `overflow-x-clip` (not `hidden`) — `hidden` creates a scroll container,
+          which breaks the Header's `position: sticky`. `clip` still prevents
+          horizontal overflow without establishing one. */}
+      <div className="flex min-h-screen flex-col overflow-x-clip" style={brandStyle}>
         <AnnouncementBar config={ticker} locale={locale} />
         <Header
-          variant={config.headerStyle}
           logoLight={branding.logoLight}
           logoDark={branding.logoDark}
           menuConfig={menuCfg}
@@ -48,7 +50,12 @@ export default async function StoreLayout({
         <main className="has-mobile-bottom-nav flex-1">{children}</main>
         {/* Trust badges sit just above the footer on every store page (admin-configurable) */}
         <FeatureBar enabled={sections.featureBar.enabled} items={sections.featureBar.items} />
-        <Footer logoLight={branding.logoLight} logoDark={branding.logoDark} menuConfig={menuCfg} />
+        <Footer
+          logoLight={branding.logoLight}
+          logoDark={branding.logoDark}
+          menuConfig={menuCfg}
+          locale={locale}
+        />
         <MobileBottomNav />
         <CartPanel />
         <FloatingCart />

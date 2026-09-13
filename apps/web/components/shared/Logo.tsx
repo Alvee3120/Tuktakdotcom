@@ -18,6 +18,12 @@ type LogoProps = {
   lightSrc?: string;
   /** Override logo image for dark mode (admin branding). Empty = default. */
   darkSrc?: string;
+  /**
+   * Render as if on a dark surface: uses the dark-mode artwork + default
+   * regardless of the active theme. Needed for the storefront header, whose bar
+   * is near-black in BOTH themes.
+   */
+  onDark?: boolean;
 };
 
 /**
@@ -53,6 +59,7 @@ export function Logo({
   className,
   lightSrc,
   darkSrc,
+  onDark = false,
 }: LogoProps) {
   // Reuse the app-wide theme from ThemeProviderWrapper instead of re-implementing
   // theme detection with `useState('light')` + requestAnimationFrame + a
@@ -66,8 +73,11 @@ export function Logo({
   // uploaded light/dark logos of different dimensions).
   const { theme } = useTheme();
 
-  const defaultSrc = theme === 'dark' ? '/logo/logo_dark_mode.png' : '/logo/logo_light_mode.png';
-  const override = theme === 'dark' ? darkSrc : lightSrc;
+  // `onDark` pins the choice to the dark-mode artwork regardless of the active
+  // theme (the storefront header bar is near-black in both themes).
+  const preferDark = onDark || theme === 'dark';
+  const defaultSrc = preferDark ? '/logo/logo_dark_mode.png' : '/logo/logo_light_mode.png';
+  const override = preferDark ? darkSrc : lightSrc;
   // Fall back across modes if only one custom logo is provided, then to defaults.
   const logoUrl = override || lightSrc || darkSrc || defaultSrc;
 

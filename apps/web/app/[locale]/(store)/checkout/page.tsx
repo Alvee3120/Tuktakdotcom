@@ -1,23 +1,21 @@
 'use client';
 
 import {
-  MapPin,
-  Plus,
   Minus,
-  Check,
   Loader2,
   ShoppingBag,
   Trash2,
-  Truck,
-  CreditCard,
-  ChevronDown,
   Lock,
   Store,
+  Plus,
+  Banknote,
+  Smartphone,
+  Wallet,
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -25,19 +23,27 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PremiumButton } from '@/components/ui/PremiumButton';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/hooks/useAuth';
-import {
-  useAddresses,
-  useCreateOrder,
-  useCreateAddress,
-  useCreateGuestOrder,
-  useValidateCoupon,
-} from '@/hooks/useOrders';
+import { useCreateOrder, useCreateGuestOrder, useValidateCoupon } from '@/hooks/useOrders';
 import { api } from '@/lib/api-client';
+import { DEFAULT_DISTRICT, DISTRICTS } from '@/lib/districts';
 import { trackApplyCoupon, trackInitiateCheckout, trackPurchase } from '@/lib/tracking';
 import { cn, formatPrice } from '@/lib/utils';
 import { useCartStore } from '@/stores/useCartStore';
+
+const PAYMENT_ICONS: Record<string, typeof Banknote> = {
+  cod: Banknote,
+  bkash: Smartphone,
+  nagad: Wallet,
+};
 
 type PaymentMethodConfig = {
   id: string;
@@ -67,6 +73,7 @@ export default function CheckoutPage() {
   const router = useRouter();
   const t = useTranslations('checkout');
   const tc = useTranslations('cart');
+  const locale = useLocale();
   const items = useCartStore((s) => s.items);
   const totalPrice = useCartStore((s) => s.totalPrice)();
   const clearCart = useCartStore((s) => s.clearCart);
@@ -75,35 +82,25 @@ export default function CheckoutPage() {
 
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
 
-  const { data: addressesRes, isLoading: loadingAddresses } = useAddresses(isAuthenticated);
-  const addresses = addressesRes?.data ?? [];
-
   const createOrder = useCreateOrder();
   const createGuestOrder = useCreateGuestOrder();
-  const createAddress = useCreateAddress();
   const validateCoupon = useValidateCoupon();
 
-  const [selectedAddress, setSelectedAddress] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<string>('');
   const [transactionId, setTransactionId] = useState('');
   const [couponCode, setCouponCode] = useState('');
   const [couponDiscount, setCouponDiscount] = useState(0);
   const [couponMessage, setCouponMessage] = useState('');
-  const [notes, setNotes] = useState('');
-  const [showAddressForm, setShowAddressForm] = useState(false);
-  const [selectedShipping, setSelectedShipping] = useState<string>('');
   const [checkoutConfig, setCheckoutConfig] = useState<CheckoutConfig | null>(null);
 
-  const [addressForm, setAddressForm] = useState({
+  const [form, setForm] = useState({
     name: '',
     phone: '',
     street: '',
-    city: '',
-    district: '',
-    postalCode: '',
-    isDefault: false,
+    district: DEFAULT_DISTRICT,
+    email: '',
+    notes: '',
   });
-  const [guestEmail, setGuestEmail] = useState('');
 
   useEffect(() => {
     api
@@ -111,14 +108,25 @@ export default function CheckoutPage() {
       .then((res) => {
         if (res.data) {
           setCheckoutConfig(res.data);
-          const enabledShipping = res.data.shippingMethods.filter((s) => s.enabled);
-          if (enabledShipping.length > 0) setSelectedShipping(enabledShipping[0].id);
           const enabledPayment = res.data.paymentMethods.filter((p) => p.enabled);
           if (enabledPayment.length > 0) setPaymentMethod(enabledPayment[0].id);
         }
       })
       .catch(() => {});
   }, []);
+
+  // Prefill from the account when signed in (still editable for this order).
+  // Adjusted during render — the React-recommended alternative to a syncing effect.
+  const [prefilledUser, setPrefilledUser] = useState<typeof user | undefined>(undefined);
+  if (user && user !== prefilledUser) {
+    setPrefilledUser(user);
+    setForm((f) => ({
+      ...f,
+      name: f.name || user.name || '',
+      phone: f.phone || user.phone || '',
+      email: f.email || user.email || '',
+    }));
+  }
 
   const enabledPayments = checkoutConfig?.paymentMethods.filter((p) => p.enabled) ?? [];
   const enabledShipping = checkoutConfig?.shippingMethods.filter((s) => s.enabled) ?? [];
@@ -127,11 +135,17 @@ export default function CheckoutPage() {
   const subtotal = totalPrice;
   const discount = couponDiscount;
   const tax = Math.round((subtotal - discount) * taxRate);
-  const selectedShippingMethod = enabledShipping.find((s) => s.id === selectedShipping);
-  const shippingCost = selectedShippingMethod
-    ? subtotal >= (selectedShippingMethod.freeAbove ?? 5000)
+
+  // Shipping is determined by the district: Dhaka city → "Inside Dhaka",
+  // everywhere else → "Outside Dhaka". Falls back to the first enabled method.
+  const isInsideDhaka = form.district === DEFAULT_DISTRICT;
+  const shippingMethod =
+    enabledShipping.find((s) => s.id === (isInsideDhaka ? 'inside-dhaka' : 'outside-dhaka')) ??
+    enabledShipping[0];
+  const shippingCost = shippingMethod
+    ? subtotal >= (shippingMethod.freeAbove ?? 5000)
       ? 0
-      : selectedShippingMethod.cost
+      : shippingMethod.cost
     : 0;
   const grandTotal = subtotal + tax + shippingCost - discount;
 
@@ -186,30 +200,18 @@ export default function CheckoutPage() {
     }
   };
 
-  const handleCreateAddress = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await createAddress.mutateAsync(addressForm);
-      setShowAddressForm(false);
-      setAddressForm({
-        name: '',
-        phone: '',
-        street: '',
-        city: '',
-        district: '',
-        postalCode: '',
-        isDefault: false,
-      });
-    } catch {}
-  };
-
-  const guestFormValid =
-    addressForm.name.trim().length >= 2 &&
-    addressForm.phone.trim().length >= 10 &&
-    addressForm.street.trim().length >= 5 &&
-    addressForm.city.trim().length >= 2;
+  const formValid =
+    form.name.trim().length >= 2 &&
+    form.phone.trim().length >= 10 &&
+    form.street.trim().length >= 5 &&
+    !!form.district &&
+    /^\S+@\S+\.\S+$/.test(form.email.trim());
 
   const handlePlaceOrder = async () => {
+    if (!formValid) {
+      toast.error(t('fillDeliveryDetails'));
+      return;
+    }
     if (!paymentMethod) {
       toast.error(t('selectPayment'));
       return;
@@ -220,71 +222,33 @@ export default function CheckoutPage() {
       return;
     }
 
-    const itemsPayload = items.map((item) => ({
-      productId: item.productId,
-      variantId: item.variantId,
-      quantity: item.quantity,
-    }));
+    // Both endpoints accept the same shape — the authenticated one additionally
+    // links the order to the account (userId) instead of leaving it anonymous.
+    const payload = {
+      name: form.name.trim(),
+      phone: form.phone.trim(),
+      email: form.email.trim(),
+      shipping: {
+        street: form.street.trim(),
+        city: form.district,
+        district: form.district,
+      },
+      shippingMethodId: shippingMethod?.id || undefined,
+      paymentMethod: paymentMethod as 'bkash' | 'nagad' | 'sslcommerz' | 'cod',
+      paymentTransactionId: transactionId.trim() || undefined,
+      couponCode: couponCode.trim() || undefined,
+      notes: form.notes.trim() || undefined,
+      items: items.map((item) => ({
+        productId: item.productId,
+        variantId: item.variantId,
+        quantity: item.quantity,
+      })),
+    };
 
-    if (isAuthenticated) {
-      if (!selectedAddress) {
-        toast.error(t('selectAddress'));
-        return;
-      }
-      try {
-        const res = await createOrder.mutateAsync({
-          shippingAddressId: selectedAddress,
-          shippingMethodId: selectedShipping || undefined,
-          paymentMethod: paymentMethod as 'bkash' | 'nagad' | 'sslcommerz' | 'cod',
-          paymentTransactionId: transactionId.trim() || undefined,
-          couponCode: couponCode || undefined,
-          notes: notes || undefined,
-          items: itemsPayload,
-        });
-        trackPurchase({
-          orderId: res.data.orderId,
-          orderNumber: res.data.orderNumber,
-          value: res.data.total,
-          items: items.map((i) => ({
-            productId: i.productId,
-            name: i.name,
-            price: i.price,
-            quantity: i.quantity,
-          })),
-        });
-        clearCart();
-        toast.success(t('orderPlaced'), {
-          description: `${t('order')} ${res.data.orderNumber} ${t('confirmed')}.`,
-        });
-        router.push(`/account/orders/${res.data.orderId}?success=true`);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : t('failedToPlaceOrder'));
-      }
-      return;
-    }
-
-    if (!guestFormValid) {
-      toast.error(t('fillGuestDetails'));
-      return;
-    }
     try {
-      const res = await createGuestOrder.mutateAsync({
-        name: addressForm.name.trim(),
-        phone: addressForm.phone.trim(),
-        email: guestEmail.trim() || undefined,
-        shipping: {
-          street: addressForm.street.trim(),
-          city: addressForm.city.trim(),
-          district: addressForm.district.trim() || undefined,
-          postalCode: addressForm.postalCode.trim() || undefined,
-        },
-        shippingMethodId: selectedShipping || undefined,
-        paymentMethod: paymentMethod as 'bkash' | 'nagad' | 'sslcommerz' | 'cod',
-        paymentTransactionId: transactionId.trim() || undefined,
-        couponCode: couponCode || undefined,
-        notes: notes || undefined,
-        items: itemsPayload,
-      });
+      const res = isAuthenticated
+        ? await createOrder.mutateAsync(payload)
+        : await createGuestOrder.mutateAsync(payload);
       trackPurchase({
         orderId: res.data.orderId,
         orderNumber: res.data.orderNumber,
@@ -300,7 +264,8 @@ export default function CheckoutPage() {
       toast.success(t('orderPlaced'), {
         description: `${t('order')} ${res.data.orderNumber} ${t('confirmed')}.`,
       });
-      // Include the secure invoice access token so the invoice page can authenticate
+      // The invoice page authenticates with the secure access token, so it works
+      // for both signed-in and guest orders.
       const token = res.data.invoiceAccessToken;
       const invoiceUrl = token
         ? `/invoices/${encodeURIComponent(res.data.orderNumber)}?token=${encodeURIComponent(token)}&placed=1`
@@ -312,9 +277,7 @@ export default function CheckoutPage() {
   };
 
   const selectedPM = enabledPayments.find((p) => p.id === paymentMethod);
-  const canPlace = isAuthenticated
-    ? !!selectedAddress && !!paymentMethod
-    : guestFormValid && !!paymentMethod;
+  const canPlace = formValid && !!paymentMethod;
   const placingOrder = createOrder.isPending || createGuestOrder.isPending;
 
   return (
@@ -334,289 +297,101 @@ export default function CheckoutPage() {
         <div className="grid gap-8 lg:grid-cols-12">
           {/* Left — form */}
           <div className="space-y-0 lg:col-span-7">
-            {/* Contact */}
+            {/* Delivery details */}
             <div className="border-border bg-card rounded-t-2xl border border-b-0 p-6">
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-bold">{t('contact')}</h2>
+                <h2 className="text-lg font-bold">{t('deliveryDetails')}</h2>
                 {!isAuthenticated && (
                   <Link href="/login" className="text-primary text-sm hover:underline">
                     {t('signIn')}
                   </Link>
                 )}
               </div>
-              {isAuthenticated ? (
-                <>
-                  <Input
-                    placeholder={t('emailOrPhone')}
-                    defaultValue={user?.email ?? ''}
-                    readOnly
-                    className="h-12"
-                  />
-                  <label className="text-muted-foreground mt-3 flex cursor-pointer items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      defaultChecked
-                      className="border-border accent-primary rounded"
-                    />
-                    {t('emailMeOffers')}
-                  </label>
-                </>
-              ) : (
-                <div className="space-y-3">
-                  <Input
-                    placeholder={t('fullName')}
-                    value={addressForm.name}
-                    onChange={(e) => setAddressForm({ ...addressForm, name: e.target.value })}
-                    required
-                    className="h-12"
-                  />
-                  <Input
-                    placeholder={t('phone')}
-                    value={addressForm.phone}
-                    onChange={(e) => setAddressForm({ ...addressForm, phone: e.target.value })}
-                    required
-                    className="h-12"
-                  />
-                  <Input
-                    placeholder={t('emailOptional')}
-                    value={guestEmail}
-                    onChange={(e) => setGuestEmail(e.target.value)}
-                    type="email"
-                    className="h-12"
-                  />
-                  <p className="text-muted-foreground text-xs">{t('guestContactNote')}</p>
-                </div>
-              )}
-            </div>
-
-            {/* Delivery */}
-            <div className="border-border bg-card border border-b-0 p-6">
-              <h2 className="mb-4 text-lg font-bold">{t('delivery')}</h2>
-              {isAuthenticated ? (
-                <div className="space-y-3">
-                  {loadingAddresses ? (
-                    <div className="text-muted-foreground flex items-center gap-2 py-4 text-sm">
-                      <Loader2 className="h-4 w-4 animate-spin" /> {t('loadingAddresses')}
-                    </div>
-                  ) : addresses.length > 0 ? (
-                    <RadioGroup
-                      value={selectedAddress}
-                      onValueChange={setSelectedAddress}
-                      className="space-y-2"
-                    >
-                      {addresses.map((addr) => (
-                        <div
-                          key={addr.id}
-                          onClick={() => setSelectedAddress(addr.id)}
-                          className={cn(
-                            'flex cursor-pointer items-start gap-3 rounded-xl border-2 p-4 transition-all',
-                            selectedAddress === addr.id
-                              ? 'border-primary bg-primary/5'
-                              : 'border-border hover:border-muted-foreground/30'
-                          )}
-                        >
-                          <RadioGroupItem value={addr.id} className="mt-1" />
-                          <div className="flex-1">
-                            <p className="text-sm font-semibold">{addr.name}</p>
-                            <p className="text-muted-foreground text-xs">
-                              {addr.street}
-                              {addr.city ? `, ${addr.city}` : ''}
-                            </p>
-                            <p className="text-muted-foreground text-xs">
-                              {addr.district ? `${addr.district}, ` : ''}
-                              {addr.postalCode ?? ''}
-                            </p>
-                            <p className="text-muted-foreground text-xs">{addr.phone}</p>
-                          </div>
-                          {addr.isDefault && (
-                            <span className="bg-primary/10 text-primary rounded-full px-2 py-0.5 text-[10px] font-medium">
-                              {t('default')}
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </RadioGroup>
-                  ) : (
-                    <div className="text-muted-foreground py-6 text-center text-sm">
-                      <MapPin className="mx-auto mb-2 h-6 w-6 opacity-40" /> {t('noSavedAddresses')}
-                    </div>
-                  )}
-
-                  {/* Add new address inline */}
-                  <button
-                    onClick={() => setShowAddressForm(!showAddressForm)}
-                    className="text-primary flex items-center gap-2 text-sm hover:underline"
-                  >
-                    <Plus className="h-4 w-4" /> {t('addNewAddress')}
-                  </button>
-                  {showAddressForm && (
-                    <form
-                      onSubmit={handleCreateAddress}
-                      className="border-border bg-muted/30 mt-2 space-y-3 rounded-xl border p-4"
-                    >
-                      <div className="grid grid-cols-2 gap-3">
-                        <Input
-                          placeholder={t('fullName')}
-                          value={addressForm.name}
-                          onChange={(e) => setAddressForm({ ...addressForm, name: e.target.value })}
-                          required
-                          className="h-10"
-                        />
-                        <Input
-                          placeholder={t('phone')}
-                          value={addressForm.phone}
-                          onChange={(e) =>
-                            setAddressForm({ ...addressForm, phone: e.target.value })
-                          }
-                          required
-                          className="h-10"
-                        />
-                      </div>
-                      <Input
-                        placeholder={t('address')}
-                        value={addressForm.street}
-                        onChange={(e) => setAddressForm({ ...addressForm, street: e.target.value })}
-                        required
-                        className="h-10"
-                      />
-                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                        <Input
-                          placeholder={t('city')}
-                          value={addressForm.city}
-                          onChange={(e) => setAddressForm({ ...addressForm, city: e.target.value })}
-                          required
-                          className="h-10"
-                        />
-                        <Input
-                          placeholder={t('district')}
-                          value={addressForm.district}
-                          onChange={(e) =>
-                            setAddressForm({ ...addressForm, district: e.target.value })
-                          }
-                          className="h-10"
-                        />
-                        <Input
-                          placeholder={t('postalCode')}
-                          value={addressForm.postalCode}
-                          onChange={(e) =>
-                            setAddressForm({ ...addressForm, postalCode: e.target.value })
-                          }
-                          className="col-span-2 h-10 sm:col-span-1"
-                        />
-                      </div>
-                      <PremiumButton
-                        variant="primary"
-                        type="submit"
-                        size="sm"
-                        disabled={createAddress.isPending}
-                      >
-                        {createAddress.isPending ? t('saving') : t('saveAddress')}
-                      </PremiumButton>
-                    </form>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <Input
-                    placeholder={t('address')}
-                    value={addressForm.street}
-                    onChange={(e) => setAddressForm({ ...addressForm, street: e.target.value })}
-                    required
-                    className="h-10"
-                  />
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                    <Input
-                      placeholder={t('city')}
-                      value={addressForm.city}
-                      onChange={(e) => setAddressForm({ ...addressForm, city: e.target.value })}
-                      required
-                      className="h-10"
-                    />
-                    <Input
-                      placeholder={t('district')}
-                      value={addressForm.district}
-                      onChange={(e) => setAddressForm({ ...addressForm, district: e.target.value })}
-                      className="h-10"
-                    />
-                    <Input
-                      placeholder={t('postalCode')}
-                      value={addressForm.postalCode}
-                      onChange={(e) =>
-                        setAddressForm({ ...addressForm, postalCode: e.target.value })
-                      }
-                      className="col-span-2 h-10 sm:col-span-1"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Shipping method */}
-            {enabledShipping.length > 0 && (
-              <div className="border-border bg-card border border-b-0 p-6">
-                <h2 className="mb-4 text-lg font-bold">{t('shippingMethod')}</h2>
-                <RadioGroup
-                  value={selectedShipping}
-                  onValueChange={setSelectedShipping}
-                  className="space-y-2"
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Input
+                  placeholder={t('fullName')}
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  className="h-12"
+                />
+                <Input
+                  placeholder={t('mobileNumber')}
+                  value={form.phone}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  inputMode="tel"
+                  className="h-12"
+                />
+                <Input
+                  placeholder={t('address')}
+                  value={form.street}
+                  onChange={(e) => setForm({ ...form, street: e.target.value })}
+                  className="h-12"
+                />
+                <Select
+                  value={form.district}
+                  onValueChange={(value) => setForm({ ...form, district: value })}
                 >
-                  {enabledShipping.map((sm) => (
-                    <div
-                      key={sm.id}
-                      onClick={() => setSelectedShipping(sm.id)}
-                      className={cn(
-                        'flex cursor-pointer items-center justify-between rounded-xl border-2 p-4 transition-all',
-                        selectedShipping === sm.id
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border hover:border-muted-foreground/30'
-                      )}
-                    >
-                      <div className="flex items-center gap-3">
-                        <RadioGroupItem value={sm.id} />
-                        <div>
-                          <p className="text-sm font-semibold">{sm.name}</p>
-                          <p className="text-muted-foreground text-xs">{sm.estimatedDays}</p>
-                        </div>
-                      </div>
-                      <span className="text-sm font-bold">
-                        {subtotal >= (sm.freeAbove ?? 5000) ? t('free') : formatPrice(sm.cost)}
-                      </span>
-                    </div>
-                  ))}
-                </RadioGroup>
+                  <SelectTrigger className="h-12 w-full">
+                    <SelectValue placeholder={t('selectDistrict')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DISTRICTS.map((d) => (
+                      <SelectItem key={d.value} value={d.value}>
+                        {locale === 'bn' ? d.labelBn : d.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  placeholder={t('email')}
+                  value={form.email}
+                  onChange={(e) => setForm({ ...form, email: e.target.value })}
+                  type="email"
+                  className="h-12"
+                />
+                <Input
+                  placeholder={t('orderNotes')}
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                  className="h-12"
+                />
               </div>
-            )}
+            </div>
 
             {/* Payment */}
-            {enabledPayments.length > 0 && (
+            {enabledPayments.length > 0 ? (
               <div className="border-border bg-card border border-b-0 p-6">
                 <h2 className="mb-1 text-lg font-bold">{t('payment')}</h2>
                 <p className="text-muted-foreground mb-4 text-xs">{t('secureTransactions')}</p>
                 <RadioGroup
                   value={paymentMethod}
                   onValueChange={setPaymentMethod}
-                  className="space-y-2"
+                  className="grid grid-cols-3 gap-2"
                 >
-                  {enabledPayments.map((pm) => (
-                    <div
-                      key={pm.id}
-                      onClick={() => setPaymentMethod(pm.id)}
-                      className={cn(
-                        'flex cursor-pointer items-center justify-between rounded-xl border-2 p-4 transition-all',
-                        paymentMethod === pm.id
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border hover:border-muted-foreground/30'
-                      )}
-                    >
-                      <div className="flex items-center gap-3">
-                        <RadioGroupItem value={pm.id} />
-                        <div>
-                          <p className="text-sm font-semibold">{pm.name}</p>
-                          <p className="text-muted-foreground text-xs">{pm.description}</p>
-                        </div>
+                  {enabledPayments.map((pm) => {
+                    const Icon = PAYMENT_ICONS[pm.id] ?? Banknote;
+                    return (
+                      <div
+                        key={pm.id}
+                        onClick={() => setPaymentMethod(pm.id)}
+                        className={cn(
+                          'flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 p-3 text-center transition-all',
+                          paymentMethod === pm.id
+                            ? 'border-primary bg-primary/5'
+                            : 'border-border hover:border-muted-foreground/30'
+                        )}
+                      >
+                        <RadioGroupItem value={pm.id} className="sr-only" />
+                        <Icon
+                          className={cn(
+                            'h-5 w-5',
+                            paymentMethod === pm.id ? 'text-primary' : 'text-muted-foreground'
+                          )}
+                        />
+                        <p className="text-xs font-semibold sm:text-sm">{pm.name}</p>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </RadioGroup>
                 {selectedPM?.requiresTransactionId && (
                   <div className="border-border bg-muted/30 mt-4 space-y-2 rounded-xl border p-4">
@@ -634,17 +409,12 @@ export default function CheckoutPage() {
                   </div>
                 )}
               </div>
+            ) : (
+              <div className="border-border bg-card border border-b-0 p-6">
+                <h2 className="mb-1 text-lg font-bold">{t('payment')}</h2>
+                <p className="text-muted-foreground text-xs">{t('noPaymentMethods')}</p>
+              </div>
             )}
-
-            {/* Order notes */}
-            <div className="mt-4">
-              <Input
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder={t('orderNotes')}
-                className="h-10"
-              />
-            </div>
 
             {/* Mobile — Place order */}
             <PremiumButton

@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState, useCallback, useRef } from 'react';
 
 import { trackSearch } from '@/lib/tracking';
-import { formatPrice } from '@/lib/utils';
+import { cn, formatPrice } from '@/lib/utils';
 
 type SearchResult = {
   id: string;
@@ -16,7 +16,19 @@ type SearchResult = {
   image: string;
 };
 
-export function SearchCommand() {
+type SearchCommandProps = {
+  /** 'box' = desktop pill, 'icon' = compact icon button (mobile). */
+  variant?: 'box' | 'icon';
+  className?: string;
+  /** Register the ⌘K shortcut — only one mounted instance should. */
+  enableShortcut?: boolean;
+};
+
+export function SearchCommand({
+  variant = 'box',
+  className,
+  enableShortcut = true,
+}: SearchCommandProps = {}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -28,7 +40,7 @@ export function SearchCommand() {
   // Keyboard shortcut
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
+      if (enableShortcut && e.key === 'k' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         setOpen((prev) => !prev);
       }
@@ -38,7 +50,7 @@ export function SearchCommand() {
     };
     document.addEventListener('keydown', down);
     return () => document.removeEventListener('keydown', down);
-  }, [open]);
+  }, [open, enableShortcut]);
 
   // Focus input when opened
   useEffect(() => {
@@ -104,17 +116,32 @@ export function SearchCommand() {
   };
 
   if (!open) {
+    if (variant === 'icon') {
+      return (
+        <button
+          onClick={() => setOpen(true)}
+          aria-label="Search products"
+          className={cn(
+            'flex h-9 w-9 items-center justify-center rounded-md text-white transition-colors hover:bg-white/10',
+            className
+          )}
+        >
+          <Search className="h-5 w-5" />
+        </button>
+      );
+    }
+
     return (
       <button
         onClick={() => setOpen(true)}
         aria-label="Search products"
-        className="border-border bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground flex items-center gap-1.5 rounded-full border px-2 py-1.5 text-xs transition-all md:gap-2 md:px-3"
+        className={cn(
+          'flex w-full items-center gap-2 rounded-full bg-white px-3.5 py-2 text-sm text-neutral-500 shadow-sm transition-colors hover:bg-neutral-100 sm:px-4',
+          className
+        )}
       >
-        <Search className="h-3.5 w-3.5" />
-        <span className="hidden md:inline">Search products...</span>
-        <kbd className="bg-muted text-muted-foreground pointer-events-none hidden h-4 items-center gap-0.5 rounded border px-1 font-mono text-[9px] font-medium lg:flex">
-          ⌘K
-        </kbd>
+        <span className="flex-1 truncate text-left">Search products...</span>
+        <Search className="h-4 w-4 shrink-0 text-neutral-400" />
       </button>
     );
   }

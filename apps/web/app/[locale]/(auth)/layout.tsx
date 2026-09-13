@@ -16,11 +16,7 @@ export default async function AuthLayout({ children }: { children: ReactNode }) 
 
   return (
     <div className="flex min-h-screen flex-col" style={brandStyle}>
-      <Header
-        variant={config.headerStyle}
-        logoLight={branding.logoLight}
-        logoDark={branding.logoDark}
-      />
+      <Header logoLight={branding.logoLight} logoDark={branding.logoDark} />
       <main className="section-padding flex flex-1 items-center justify-center">
         <Container size="sm">
           <div className="mx-auto max-w-md space-y-6">

@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '@/lib/api-client';
 
@@ -10,6 +10,9 @@ export type Pagination = {
   totalPages: number;
 };
 
+/** Dashboard time-period filter */
+export type DashboardPeriod = '24h' | '7d' | '30d' | 'all';
+
 /** Dashboard stats */
 export type DashboardStats = {
   totalProducts: number;
@@ -20,7 +23,7 @@ export type DashboardStats = {
   lowStockProducts: AdminProduct[];
   outOfStockCount: number;
   statusCounts: Record<string, number>;
-  weeklySeries: { day: string; revenue: number; orders: number }[];
+  series: { bucket: string; revenue: number; orders: number }[];
   recentTransactions: {
     id: string;
     orderNumber: string;
@@ -232,11 +235,15 @@ export type AdminUser = {
 };
 
 // ── Dashboard ──
-export function useDashboardStats() {
+export function useDashboardStats(period: DashboardPeriod = '7d') {
   return useQuery({
-    queryKey: ['admin', 'stats'],
-    queryFn: () => api.get<{ success: boolean; data: DashboardStats }>('/api/admin/dashboard'),
+    queryKey: ['admin', 'stats', period],
+    queryFn: () =>
+      api.get<{ success: boolean; data: DashboardStats }>('/api/admin/dashboard', {
+        params: { period },
+      }),
     staleTime: 60 * 1000,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -334,7 +341,14 @@ export async function uploadImage(file: File, folder?: string): Promise<string> 
 }
 
 // ── Orders ──
-export function useAdminOrders(params: { page?: number; status?: string; search?: string } = {}) {
+export function useAdminOrders(
+  params: {
+    page?: number;
+    status?: string;
+    search?: string;
+    period?: DashboardPeriod;
+  } = {}
+) {
   return useQuery({
     queryKey: ['admin', 'orders', params],
     queryFn: () =>
@@ -348,9 +362,15 @@ export function useAdminOrders(params: { page?: number; status?: string; search?
           statusCounts: Record<string, number>;
         };
       }>('/api/admin/orders', {
-        params: { page: params.page, status: params.status, search: params.search || undefined },
+        params: {
+          page: params.page,
+          status: params.status,
+          search: params.search || undefined,
+          period: params.period,
+        },
       }),
     staleTime: 30 * 1000,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -633,8 +653,38 @@ export type InventoryReport = {
     stock_value: number;
   };
   rows: InventoryReportRow[];
+  /** Present only when fetched with `detail=1` (used by the Excel export). */
+  salesDetail?: InventorySaleLine[];
+  /** Present only when fetched with `detail=1`. */
+  stockRows?: InventoryStockRow[];
   range: { from: string | null; to: string | null };
   inventoryId: string;
+};
+
+/** One sold line item — the row-level detail behind the inventory report. */
+export type InventorySaleLine = {
+  date: string;
+  orderNumber: string;
+  status: string;
+  customer: string;
+  productName: string;
+  sku: string | null;
+  quantity: number;
+  unitPrice: number;
+  unitCost: number;
+  revenue: number;
+  cost: number;
+  profit: number;
+};
+
+/** Stock on hand for one product (per inventory, or all). */
+export type InventoryStockRow = {
+  name: string;
+  sku: string | null;
+  quantity: number;
+  unitCost: number;
+  stockValue: number;
+  status: string;
 };
 
 export function useInventories() {
@@ -820,10 +870,60 @@ export type PnlReport = {
   discountsGiven: number;
   expensesByCategory: { category: string; total: number }[];
   totalExpenses: number;
+  /** Supplier purchases in the period — informational (goods bought), not deducted. */
+  purchaseTotal: number;
+  /** Cash actually paid to suppliers — deducted, and included in totalExpenses. */
+  supplierPayments: number;
   netProfit: number;
   orderCount: number;
   unitsSold: number;
+  /** Present only when fetched with `detail=1` (used by the Excel export). */
+  orderRows?: PnlOrderRow[];
+  /** Present only when fetched with `detail=1`. */
+  productRows?: PnlProductRow[];
+  /** Present only when fetched with `detail=1`. */
+  purchaseRows?: PnlPurchaseRow[];
   range: { from: string | null; to: string | null };
+};
+
+/** Per-order P&L breakdown. */
+export type PnlOrderRow = {
+  orderNumber: string;
+  date: string;
+  customer: string;
+  status: string;
+  paymentMethod: string | null;
+  paymentStatus: string | null;
+  units: number;
+  revenue: number;
+  cogs: number;
+  grossProfit: number;
+  margin: number;
+  shipping: number;
+  discount: number;
+  tax: number;
+  total: number;
+};
+
+/** Per-product profitability. */
+export type PnlProductRow = {
+  name: string;
+  sku: string | null;
+  qtySold: number;
+  revenue: number;
+  cogs: number;
+  grossProfit: number;
+  margin: number;
+};
+
+/** Supplier purchase ledger row with its outstanding balance. */
+export type PnlPurchaseRow = {
+  supplier: string;
+  description: string | null;
+  date: string;
+  total: number;
+  paid: number;
+  due: number;
 };
 
 export function useExpenses(params: { from?: string; to?: string; page?: number } = {}) {

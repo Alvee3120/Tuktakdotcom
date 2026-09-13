@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Settings, LayoutDashboard } from 'lucide-react';
+import { Settings } from 'lucide-react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 
@@ -28,15 +28,6 @@ export function ProfileHero() {
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          {user?.role === 'admin' && (
-            <Link
-              href="/admin"
-              className="bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
-            >
-              <LayoutDashboard className="h-3.5 w-3.5" />
-              {t('adminDashboard')}
-            </Link>
-          )}
           <UserAvatar
             image={user?.image}
             name={user?.name}

@@ -22,7 +22,9 @@ import {
   useUpdateInventory,
   useInventoryReport,
   type AdminInventory,
+  type InventoryReport,
 } from '@/hooks/useAdmin';
+import { api } from '@/lib/api-client';
 import { exportReportToXlsx } from '@/lib/export-excel';
 import { cn, formatPrice } from '@/lib/utils';
 
@@ -143,7 +145,13 @@ export default function AdminInventoryPage() {
         selectedId === 'all'
           ? 'All Inventories'
           : (inventories.find((i) => i.id === selectedId)?.name ?? 'Inventory');
-      await exportReportToXlsx(report, invName, range);
+      // Re-fetch with `detail=1` so the workbook includes the sales-line and
+      // stock-level sheets, not just the on-screen aggregates.
+      const detailed = await api.get<{ success: boolean; data: InventoryReport }>(
+        `/api/admin/inventories/${selectedId}/report`,
+        { params: { from: range.from, to: range.to, detail: 1 } }
+      );
+      await exportReportToXlsx(detailed.data, invName, range);
       toast.success('Excel file downloaded');
     } catch {
       toast.error('Export failed');

@@ -4,10 +4,13 @@ import { AlertTriangle, Package } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
+import { useState } from 'react';
 
 import { AreaChart } from '@/components/dashboard/AreaChart';
+import { periodAxisLabels } from '@/components/dashboard/chart-labels';
+import { PeriodFilter } from '@/components/dashboard/PeriodFilter';
 import { StatCard } from '@/components/dashboard/StatCard';
-import { useDashboardStats } from '@/hooks/useAdmin';
+import { useDashboardStats, type DashboardPeriod } from '@/hooks/useAdmin';
 import { formatPrice } from '@/lib/utils';
 
 const STATUS_DOT: Record<string, string> = {
@@ -38,8 +41,16 @@ export default function AdminDashboardPage() {
   const tc = useTranslations('admin.common');
   const ts = useTranslations('admin.status');
 
-  const { data, isLoading, isError, refetch } = useDashboardStats();
+  const [period, setPeriod] = useState<DashboardPeriod>('7d');
+  const { data, isLoading, isError, refetch } = useDashboardStats(period);
   const stats = data?.data;
+
+  const periodLabel = {
+    '24h': tc('last24Hours'),
+    '7d': tc('last7Days'),
+    '30d': tc('last30Days'),
+    all: tc('allTime'),
+  }[period];
 
   const statusLabel = (status: string) => (KNOWN_STATUSES.has(status) ? ts(status) : status);
 
@@ -49,7 +60,6 @@ export default function AdminDashboardPage() {
     hour: '2-digit',
     minute: '2-digit',
   });
-  const dayFmt = new Intl.DateTimeFormat(locale, { weekday: 'short', timeZone: 'UTC' });
 
   if (isLoading) {
     return (
@@ -88,38 +98,43 @@ export default function AdminDashboardPage() {
     );
   }
 
-  const weekRevenue = stats.weeklySeries.reduce((sum, d) => sum + d.revenue, 0);
-  const weekOrders = stats.weeklySeries.reduce((sum, d) => sum + d.orders, 0);
-  const chartData = stats.weeklySeries.map((d) => d.revenue);
-  const chartLabels = stats.weeklySeries.map((d) => dayFmt.format(new Date(`${d.day}T00:00:00Z`)));
+  const periodRevenue = stats.series.reduce((sum, d) => sum + d.revenue, 0);
+  const periodOrders = stats.series.reduce((sum, d) => sum + d.orders, 0);
+  const chartData = stats.series.map((d) => d.revenue);
+  const axisLabels = periodAxisLabels(
+    stats.series.map((d) => d.bucket),
+    period,
+    locale
+  );
   const maxStatusCount = Math.max(1, ...Object.values(stats.statusCounts));
 
   return (
     <div className="space-y-6">
+      {/* Time-period filter */}
+      <PeriodFilter value={period} onChange={setPeriod} />
+
       {/* Stats cards row */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title={t('totalSales')}
           value={formatPrice(stats.totalRevenue)}
           subtitle={t('deliveredRevenue')}
-          percentageLabel={tc('allTime')}
+          percentageLabel={periodLabel}
         />
         <StatCard
           title={t('totalOrders')}
           value={stats.totalOrders.toLocaleString()}
-          subtitle={tc('allTime')}
-          secondaryValue={weekOrders.toLocaleString()}
-          secondaryLabel={tc('last7Days')}
+          subtitle={periodLabel}
         />
         <StatCard
           title={t('pendingOrders')}
           value={(stats.statusCounts.pending ?? 0).toLocaleString()}
-          subtitle={tc('allTime')}
+          subtitle={periodLabel}
         />
         <StatCard
           title={t('cancelledOrders')}
           value={(stats.statusCounts.cancelled ?? 0).toLocaleString()}
-          subtitle={tc('allTime')}
+          subtitle={periodLabel}
         />
       </div>
 
@@ -130,8 +145,8 @@ export default function AdminDashboardPage() {
           {/* Weekly report */}
           <div className="border-border bg-card rounded-xl border p-5 shadow-sm">
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-foreground text-base font-semibold">{t('weeklyReport')}</h2>
-              <span className="text-muted-foreground/70 text-xs">{tc('last7Days')}</span>
+              <h2 className="text-foreground text-base font-semibold">{t('salesOverview')}</h2>
+              <span className="text-muted-foreground/70 text-xs">{periodLabel}</span>
             </div>
 
             {/* Mini stats */}
@@ -140,8 +155,8 @@ export default function AdminDashboardPage() {
                 { label: t('customers'), value: stats.totalUsers.toLocaleString() },
                 { label: t('totalProducts'), value: stats.totalProducts.toLocaleString() },
                 { label: t('outOfStock'), value: stats.outOfStockCount.toLocaleString() },
-                { label: t('revenue'), value: formatPrice(weekRevenue) },
-                { label: t('orders'), value: weekOrders.toLocaleString() },
+                { label: t('revenue'), value: formatPrice(periodRevenue) },
+                { label: t('orders'), value: periodOrders.toLocaleString() },
               ].map((stat) => (
                 <div key={stat.label}>
                   <p className="text-foreground text-xl font-bold">{stat.value}</p>
@@ -151,7 +166,7 @@ export default function AdminDashboardPage() {
             </div>
 
             {chartData.some((v) => v > 0) ? (
-              <AreaChart data={chartData} labels={chartLabels} height={160} maxHeight={180} />
+              <AreaChart data={chartData} labels={axisLabels} height={160} maxHeight={180} />
             ) : (
               <p className="text-muted-foreground/70 py-10 text-center text-sm">
                 {t('noSalesYet')}

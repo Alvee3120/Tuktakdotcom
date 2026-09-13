@@ -86,7 +86,7 @@ export default function TransactionPage() {
     label: t.value === 'all' ? tc('all') : tst(t.value),
     count: t.value === 'all' ? allCount : (counts[t.value] ?? 0),
   }));
-  const bkashStats = meta?.methodBreakdown.find((m) => m.method === 'bkash');
+  const codStats = meta?.methodBreakdown.find((m) => m.method === 'cod');
 
   const handlePaymentStatusChange = async (id: string, paymentStatus: string) => {
     try {
@@ -117,9 +117,9 @@ export default function TransactionPage() {
           subtitle="Awaiting verification"
         />
         <StatCard
-          title="bKash Transactions"
-          value={(bkashStats?.count ?? 0).toLocaleString()}
-          subtitle={`${formatPrice(bkashStats?.total ?? 0)} volume`}
+          title="COD Transactions"
+          value={(codStats?.count ?? 0).toLocaleString()}
+          subtitle={`${formatPrice(codStats?.total ?? 0)} volume`}
         />
       </div>
 

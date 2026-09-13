@@ -94,7 +94,7 @@ function ProductList({
         className="scrollbar-hide overflow-x-auto scroll-smooth"
         style={{ scrollSnapType: 'x mandatory' }}
       >
-        <div className="flex min-w-max gap-3 sm:gap-4">
+        <div className="flex w-full gap-3 sm:gap-4">
           {products.map((product) => (
             <div
               key={product.id}

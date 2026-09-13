@@ -121,16 +121,23 @@ export function useDeleteAddress() {
   });
 }
 
+/** Inline delivery details used when no saved address is attached */
+export type OrderDeliveryInput = {
+  name: string;
+  phone: string;
+  email?: string;
+  shipping: { street: string; city: string; district?: string; postalCode?: string };
+};
+
 /** Create order payload matching API schema */
 export type CreateOrderPayload = {
-  shippingAddressId: string;
+  items: { productId: string; variantId?: string; quantity: number }[];
   shippingMethodId?: string;
   paymentMethod: 'bkash' | 'nagad' | 'sslcommerz' | 'cod';
   paymentTransactionId?: string;
   couponCode?: string;
   notes?: string;
-  items: { productId: string; variantId?: string; quantity: number }[];
-};
+} & ({ shippingAddressId: string } | OrderDeliveryInput);
 
 /** Response returned by POST /api/orders (create order) */
 export type CreateOrderResult = {

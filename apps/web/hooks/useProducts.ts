@@ -82,10 +82,12 @@ type ProductListParams = {
   limit?: number;
   search?: string;
   category?: string;
+  /** Include products from child categories of `category`. */
+  includeDescendants?: boolean;
   brand?: string;
   minPrice?: number;
   maxPrice?: number;
-  sort?: 'newest' | 'price_asc' | 'price_desc' | 'rating';
+  sort?: 'newest' | 'price_asc' | 'price_desc' | 'rating' | 'best_selling';
   featured?: boolean;
   ids?: string[];
 };
@@ -101,6 +103,7 @@ export function useProducts(params: ProductListParams = {}) {
           limit: params.limit,
           search: params.search,
           category: params.category,
+          includeDescendants: params.includeDescendants ? 'true' : undefined,
           brand: params.brand,
           minPrice: params.minPrice,
           maxPrice: params.maxPrice,

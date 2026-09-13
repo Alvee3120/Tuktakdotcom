@@ -31,6 +31,7 @@ productRoutes.get('/', zValidator('query', productListSchema), async (c) => {
     limit: query.limit,
     search: query.search,
     categoryId: query.category,
+    includeDescendants: query.includeDescendants,
     brandId: query.brand,
     minPrice: query.minPrice,
     maxPrice: query.maxPrice,

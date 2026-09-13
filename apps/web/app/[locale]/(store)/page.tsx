@@ -6,13 +6,20 @@ import { BrandCarousel } from '@/components/store/BrandCarousel';
 import { CategoryCircles } from '@/components/store/CategoryCircles';
 import { CategoryShowcase } from '@/components/store/CategoryShowcase';
 import { CategoryTabsShowcase } from '@/components/store/CategoryTabsShowcase';
+import { CollectionTabsShowcase } from '@/components/store/CollectionTabsShowcase';
 import { FlashDeal } from '@/components/store/FlashDeal';
 import { HeroSection, type HeroSlide } from '@/components/store/HeroSection';
+import { ProductRowsSection } from '@/components/store/ProductRowsSection';
 import { PromoBanners } from '@/components/store/PromoBanners';
 import { TabbedProductShowcase } from '@/components/store/TabbedProductShowcase';
 import { TrendingProducts } from '@/components/store/TrendingProducts';
 import { getHomeConfig, type SectionKey } from '@/lib/home-config';
 
+/**
+ * Hero slides are imagery only. The API returns the whole row (the table still
+ * carries legacy text columns), so project it down to the fields the hero
+ * actually renders — that keeps unused copy out of the client payload.
+ */
 async function getHeroSlides(): Promise<HeroSlide[]> {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8787';
   try {
@@ -20,8 +27,18 @@ async function getHeroSlides(): Promise<HeroSlide[]> {
       next: { tags: ['hero-slides'], revalidate: 0 },
     });
     if (!res.ok) return [];
-    const body = (await res.json()) as { success?: boolean; data?: unknown };
-    return body.success && Array.isArray(body.data) ? (body.data as HeroSlide[]) : [];
+    const body = (await res.json()) as { success?: boolean; data?: Partial<HeroSlide>[] };
+    if (!body.success || !Array.isArray(body.data)) return [];
+    return body.data.map((s) => ({
+      id: String(s.id ?? ''),
+      image: s.image ?? '',
+      backgroundImage: s.backgroundImage ?? null,
+      mobileBackgroundImage: s.mobileBackgroundImage ?? null,
+      animation: s.animation ?? 'fade',
+      animationDuration: s.animationDuration ?? 900,
+      sortOrder: s.sortOrder ?? 0,
+      isActive: s.isActive ?? true,
+    }));
   } catch {
     return [];
   }
@@ -43,6 +60,19 @@ export default async function HomePage() {
             key={key}
             style={sections.categoryCircles.style}
             visibleCount={sections.categoryCircles.visibleCount}
+          />
+        ) : null;
+
+      case 'collectionTabs':
+        return sections.collectionTabs.enabled && sections.collectionTabs.tabs.length > 0 ? (
+          <CollectionTabsShowcase
+            key={key}
+            title={sections.collectionTabs.title || undefined}
+            titleBn={sections.collectionTabs.titleBn || undefined}
+            tabs={sections.collectionTabs.tabs}
+            style={sections.collectionTabs.style}
+            grid={sections.collectionTabs.grid}
+            cardVariant={config.productCardStyle}
           />
         ) : null;
 
@@ -188,6 +218,15 @@ export default async function HomePage() {
           />
         ) : null;
 
+      case 'productRows':
+        return sections.productRows.enabled && sections.productRows.rows.length > 0 ? (
+          <ProductRowsSection
+            key={key}
+            rows={sections.productRows.rows}
+            cardVariant={config.productCardStyle}
+          />
+        ) : null;
+
       case 'featureBar':
         return null; // FeatureBar is rendered in the layout, not in the section order
 
@@ -198,7 +237,7 @@ export default async function HomePage() {
 
   return (
     <>
-      <HeroSection slides={heroSlides} variant={config.heroStyle} />
+      <HeroSection slides={heroSlides} />
 
       {sectionOrder.map((key) => renderSection(key))}
 

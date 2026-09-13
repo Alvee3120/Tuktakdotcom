@@ -231,6 +231,13 @@ orderRoutes.post('/', requireAuth, zValidator('json', createOrderSchema), async 
     userId: user.id,
     items: body.items,
     shippingAddressId: body.shippingAddressId,
+    // Inline delivery details (no saved address): still tied to the account via
+    // userId, but stored as a snapshot like a guest order.
+    guest:
+      !body.shippingAddressId && body.name && body.phone
+        ? { name: body.name, email: body.email, phone: body.phone }
+        : undefined,
+    shipping: !body.shippingAddressId ? body.shipping : undefined,
     shippingMethodId: body.shippingMethodId,
     paymentMethod: body.paymentMethod,
     paymentTransactionId: body.paymentTransactionId,
@@ -253,23 +260,32 @@ orderRoutes.post('/', requireAuth, zValidator('json', createOrderSchema), async 
         .where(and(eq(addresses.id, body.shippingAddressId), eq(addresses.userId, user.id)))
         .limit(1)
     : [undefined];
-  const fullName = (addr?.name || user.name || '').trim();
-  const [firstName, ...restName] = fullName.split(/\s+/);
+  // Contact details come from the saved address, else the inline form.
+  const contactName = addr?.name || body.name || user.name || '';
+  const contactPhone = addr?.phone ?? body.phone ?? user.phone;
+  const contactEmail = addr ? user.email : (body.email ?? user.email);
+  const city = addr?.city ?? body.shipping?.city ?? null;
+  const postalCode = addr?.postalCode ?? body.shipping?.postalCode ?? null;
+  const [firstName, ...restName] = contactName.trim().split(/\s+/);
   schedulePostOrderTasks(c, db, {
     orderId,
     orderNumber,
     total,
     contentIds: body.items.map((i) => i.productId),
     numItems: body.items.reduce((sum, i) => sum + i.quantity, 0),
-    email: user.email,
-    phone: addr?.phone ?? user.phone,
+    email: contactEmail,
+    phone: contactPhone,
     firstName: firstName || null,
     lastName: restName.length > 0 ? restName.join(' ') : null,
-    city: addr?.city ?? null,
-    postalCode: addr?.postalCode ?? null,
+    city,
+    postalCode,
     userId: user.id,
     paymentMethod: body.paymentMethod,
-    deliveryAddress: addr ? `${addr.street || ''}, ${addr.city || ''}`.trim() : undefined,
+    deliveryAddress: addr
+      ? `${addr.street || ''}, ${addr.city || ''}`.trim()
+      : body.shipping
+        ? `${body.shipping.street || ''}, ${body.shipping.city || ''}`.trim()
+        : undefined,
     invoiceAccessToken,
   });
 
