@@ -14,6 +14,7 @@ import {
   blogPosts,
 } from '@/db';
 import { indexBy } from '@/lib/collections';
+import { toNum } from '@/lib/numbers';
 import { ALLOWED_IMAGE_TYPES } from '@/lib/images';
 import { getNewsTickerConfig } from '@/lib/news-ticker';
 import { invalidateSetting } from '@/lib/settings-cache';
@@ -119,6 +120,60 @@ adminApp.get('/me', async (c) => {
     },
   });
 });
+
+// ── Change your own email (admin-role page) ──
+// Better Auth rejects email updates through /update-user
+// (`EMAIL_CAN_NOT_BE_UPDATED`), and its `changeEmail` flow requires verification
+// emails this project doesn't send (`requireEmailVerification: false`). So we
+// update the column directly, gated on the current password — email is the login
+// identity, so a stolen session alone must not be able to move it.
+const changeOwnEmailSchema = z.object({
+  newEmail: z.string().email().max(255),
+  currentPassword: z.string().min(1),
+});
+
+adminApp.post(
+  '/me/email',
+  requireRole('admin'),
+  zValidator('json', changeOwnEmailSchema),
+  async (c) => {
+    const user = c.var.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+    const { currentPassword } = c.req.valid('json');
+    const email = c.req.valid('json').newEmail.trim().toLowerCase();
+
+    if (email === user.email.toLowerCase()) {
+      return c.json({ error: 'That is already your email address' }, 400);
+    }
+
+    // Re-verify the password against Better Auth's hasher before changing identity.
+    const auth = createAuth(c.env);
+    try {
+      await auth.api.verifyPassword({
+        body: { password: currentPassword },
+        headers: c.req.raw.headers,
+      });
+    } catch {
+      return c.json({ error: 'Current password is incorrect' }, 400);
+    }
+
+    const db = createDb();
+    const [taken] = await db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(eq(schema.users.email, email))
+      .limit(1);
+    if (taken) return c.json({ error: 'Email already in use' }, 400);
+
+    await db
+      .update(schema.users)
+      .set({ email, emailVerified: false, updatedAt: new Date().toISOString() })
+      .where(eq(schema.users.id, user.id));
+
+    return c.json({ success: true, data: { email } });
+  }
+);
 
 // ── Inventory Management ──
 adminApp.route('/inventories', inventoryRoutes);
@@ -282,7 +337,7 @@ adminApp.get('/stats', async (c) => {
   ]);
 
   const statusCounts: Record<string, number> = {};
-  for (const row of statusRows) statusCounts[row.status] = row.count;
+  for (const row of statusRows) statusCounts[row.status] = toNum(row.count);
 
   // Fill in the last 7 days so the chart always has 7 points
   const dailyMap = indexBy(dailyRows, (r) => r.day);
@@ -292,28 +347,93 @@ adminApp.get('/stats', async (c) => {
     d.setUTCDate(d.getUTCDate() + i);
     const key = d.toISOString().slice(0, 10);
     const row = dailyMap.get(key);
-    weeklySeries.push({ day: key, revenue: row?.revenue ?? 0, orders: row?.orders ?? 0 });
+    weeklySeries.push({ day: key, revenue: toNum(row?.revenue), orders: toNum(row?.orders) });
   }
 
   return c.json({
     success: true,
     data: {
-      totalProducts: totalProducts[0]?.count ?? 0,
-      totalOrders: totalOrders[0]?.count ?? 0,
-      totalUsers: totalUsers[0]?.count ?? 0,
-      totalRevenue: totalRevenue[0]?.total ?? 0,
+      totalProducts: toNum(totalProducts[0]?.count),
+      totalOrders: toNum(totalOrders[0]?.count),
+      totalUsers: toNum(totalUsers[0]?.count),
+      totalRevenue: toNum(totalRevenue[0]?.total),
       recentOrders,
       lowStockProducts,
-      outOfStockCount: outOfStock[0]?.count ?? 0,
+      outOfStockCount: toNum(outOfStock[0]?.count),
       statusCounts,
       weeklySeries,
       recentTransactions,
       bestSellers,
-      newsletterCount: newsletterRow?.count ?? 0,
-      newCustomersThisWeek: newCustomers[0]?.count ?? 0,
+      newsletterCount: toNum(newsletterRow?.count),
+      newCustomersThisWeek: toNum(newCustomers[0]?.count),
     },
   });
 });
+
+// ── Dashboard time-period filter ──
+// `period` scopes order-derived metrics (totals, status breakdown, revenue,
+// best sellers) and the chart series. Inventory/customer counts stay absolute
+// because they describe current state, not a time window.
+type DashboardPeriod = '24h' | '7d' | '30d' | 'all';
+
+function dashboardBuckets(period: DashboardPeriod, now = new Date()) {
+  const hourlyKey = (d: Date) => {
+    const x = new Date(d);
+    x.setUTCMinutes(0, 0, 0);
+    return `${x.toISOString().slice(0, 13)}:00:00`;
+  };
+  const dailyKey = (d: Date) => d.toISOString().slice(0, 10);
+  const monthlyKey = (d: Date) => `${d.toISOString().slice(0, 7)}-01`;
+
+  const hourlyExpr = sql<string>`to_char(date_trunc('hour', ${schema.orders.createdAt}), 'YYYY-MM-DD"T"HH24:00:00')`;
+  const dailyExpr = sql<string>`to_char(${schema.orders.createdAt}, 'YYYY-MM-DD')`;
+  const monthlyExpr = sql<string>`to_char(date_trunc('month', ${schema.orders.createdAt}), 'YYYY-MM-DD')`;
+
+  if (period === '24h') {
+    const keys: string[] = [];
+    for (let i = 23; i >= 0; i--) {
+      const d = new Date(now);
+      d.setUTCHours(now.getUTCHours() - i);
+      keys.push(hourlyKey(d));
+    }
+    const start = new Date(now);
+    start.setUTCHours(now.getUTCHours() - 23, 0, 0, 0);
+    return { since: start.toISOString(), bucketExpr: hourlyExpr, keys };
+  }
+
+  if (period === '30d') {
+    const keys: string[] = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(now);
+      d.setUTCDate(now.getUTCDate() - i);
+      keys.push(dailyKey(d));
+    }
+    const start = new Date(now);
+    start.setUTCDate(now.getUTCDate() - 29);
+    start.setUTCHours(0, 0, 0, 0);
+    return { since: start.toISOString(), bucketExpr: dailyExpr, keys };
+  }
+
+  if (period === 'all') {
+    const keys: string[] = [];
+    for (let i = 11; i >= 0; i--) {
+      keys.push(monthlyKey(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1))));
+    }
+    return { since: null, bucketExpr: monthlyExpr, keys };
+  }
+
+  // 7d — default
+  const keys: string[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now);
+    d.setUTCDate(now.getUTCDate() - i);
+    keys.push(dailyKey(d));
+  }
+  const start = new Date(now);
+  start.setUTCDate(now.getUTCDate() - 6);
+  start.setUTCHours(0, 0, 0, 0);
+  return { since: start.toISOString(), bucketExpr: dailyExpr, keys };
+}
 
 // ── Role-aware Dashboard Stats ──
 // Admin gets everything. Moderators get data scoped to their granted permissions.
@@ -344,10 +464,13 @@ adminApp.get('/dashboard', async (c) => {
 
   const has = (key: string) => isAdmin || granted.has(key);
 
-  const weekStart = new Date();
-  weekStart.setUTCDate(weekStart.getUTCDate() - 6);
-  weekStart.setUTCHours(0, 0, 0, 0);
-  const weekStartStr = weekStart.toISOString();
+  const periodParam = c.req.query('period');
+  const period: DashboardPeriod =
+    periodParam === '24h' || periodParam === '30d' || periodParam === 'all' ? periodParam : '7d';
+  const buckets = dashboardBuckets(period);
+  const sinceFilter = buckets.since
+    ? sql`${schema.orders.createdAt} >= ${buckets.since}`
+    : undefined;
 
   // Parallel queries — only fetch what the user can see.
   const queries: Promise<unknown>[] = [];
@@ -355,21 +478,22 @@ adminApp.get('/dashboard', async (c) => {
   // Always: basic counts for the stat cards
   if (has('orders')) {
     queries.push(
-      db.select({ count: sql<number>`count(*)` }).from(schema.orders),
+      db.select({ count: sql<number>`count(*)` }).from(schema.orders).where(sinceFilter),
       db
         .select({ status: schema.orders.status, count: sql<number>`count(*)` })
         .from(schema.orders)
+        .where(sinceFilter)
         .groupBy(schema.orders.status),
       db
         .select({
-          day: sql<string>`date(${schema.orders.createdAt})`,
+          bucket: buckets.bucketExpr,
           revenue: sql<number>`COALESCE(SUM(${schema.orders.total}), 0)`,
           orders: sql<number>`count(*)`,
         })
         .from(schema.orders)
-        .where(sql`${schema.orders.createdAt} >= ${weekStartStr}`)
-        .groupBy(sql`date(${schema.orders.createdAt})`)
-        .orderBy(sql`date(${schema.orders.createdAt})`),
+        .where(sinceFilter)
+        .groupBy(buckets.bucketExpr)
+        .orderBy(buckets.bucketExpr),
       db
         .select({
           id: schema.orders.id,
@@ -427,6 +551,8 @@ adminApp.get('/dashboard', async (c) => {
         })
         .from(schema.orderItems)
         .innerJoin(schema.products, eq(schema.orderItems.productId, schema.products.id))
+        .innerJoin(schema.orders, eq(schema.orderItems.orderId, schema.orders.id))
+        .where(sinceFilter)
         .groupBy(
           schema.orderItems.productId,
           schema.products.name,
@@ -478,19 +604,30 @@ adminApp.get('/dashboard', async (c) => {
 
   const results = await Promise.all(queries);
 
-  // Unpack results in order
+  // Unpack results in order. Aggregates come back as strings from the driver,
+  // so every one is coerced — otherwise client-side `+` concatenates digits.
   let idx = 0;
-  const totalOrders = has('orders') ? (results[idx++] as { count: number }[])[0]?.count ?? 0 : 0;
-  const statusRows = has('orders') ? (results[idx++] as { status: string; count: number }[]) : [];
-  const dailyRows = has('orders')
-    ? (results[idx++] as { day: string; revenue: number; orders: number }[])
+  const totalOrders = has('orders') ? toNum((results[idx++] as { count: unknown }[])[0]?.count) : 0;
+  const statusRows = has('orders') ? (results[idx++] as { status: string; count: unknown }[]) : [];
+  const seriesRows = has('orders')
+    ? (results[idx++] as { bucket: string; revenue: unknown; orders: unknown }[])
     : [];
   const recentOrders = has('orders') ? (results[idx++] as Record<string, unknown>[]) : [];
-  const totalProducts = has('products') ? (results[idx++] as { count: number }[])[0]?.count ?? 0 : 0;
-  const outOfStock = has('products') ? (results[idx++] as { count: number }[])[0]?.count ?? 0 : 0;
+  const totalProducts = has('products')
+    ? toNum((results[idx++] as { count: unknown }[])[0]?.count)
+    : 0;
+  const outOfStock = has('products') ? toNum((results[idx++] as { count: unknown }[])[0]?.count) : 0;
   const lowStockProducts = has('products') ? (results[idx++] as Record<string, unknown>[]) : [];
-  const bestSellers = has('products') ? (results[idx++] as Record<string, unknown>[]) : [];
-  const totalUsers = has('customers') ? (results[idx++] as { count: number }[])[0]?.count ?? 0 : 0;
+  const bestSellersRaw = has('products')
+    ? (results[idx++] as { sold?: unknown; revenue?: unknown }[])
+    : [];
+  // SUM() over order items arrives as a string — coerce for the client.
+  const bestSellers = bestSellersRaw.map((p) => ({
+    ...p,
+    sold: toNum(p.sold),
+    revenue: toNum(p.revenue),
+  }));
+  const totalUsers = has('customers') ? toNum((results[idx++] as { count: unknown }[])[0]?.count) : 0;
   const recentTransactions = has('transactions') ? (results[idx++] as Record<string, unknown>[]) : [];
 
   // Revenue (admin-only — financial data)
@@ -499,22 +636,19 @@ adminApp.get('/dashboard', async (c) => {
     const [rev] = await db
       .select({ total: sql<number>`COALESCE(SUM(${schema.orders.total}), 0)` })
       .from(schema.orders)
-      .where(eq(schema.orders.status, 'delivered'));
-    totalRevenue = rev?.total ?? 0;
+      .where(and(eq(schema.orders.status, 'delivered'), sinceFilter));
+    totalRevenue = toNum(rev?.total);
   }
 
   const statusCounts: Record<string, number> = {};
-  for (const row of statusRows) statusCounts[row.status] = row.count;
+  for (const row of statusRows) statusCounts[row.status] = toNum(row.count);
 
-  const dailyMap = indexBy(dailyRows, (r) => r.day);
-  const weeklySeries: { day: string; revenue: number; orders: number }[] = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(weekStart);
-    d.setUTCDate(d.getUTCDate() + i);
-    const key = d.toISOString().slice(0, 10);
-    const row = dailyMap.get(key);
-    weeklySeries.push({ day: key, revenue: row?.revenue ?? 0, orders: row?.orders ?? 0 });
-  }
+  // Fill in every bucket so the chart always has a point per interval
+  const bucketMap = indexBy(seriesRows, (r) => r.bucket);
+  const series = buckets.keys.map((key) => {
+    const row = bucketMap.get(key);
+    return { bucket: key, revenue: toNum(row?.revenue), orders: toNum(row?.orders) };
+  });
 
   return c.json({
     success: true,
@@ -527,7 +661,7 @@ adminApp.get('/dashboard', async (c) => {
       lowStockProducts,
       outOfStockCount: outOfStock,
       statusCounts,
-      weeklySeries,
+      series,
       recentTransactions,
       bestSellers,
       newsletterCount: 0,
@@ -964,7 +1098,16 @@ adminApp.get('/orders', async (c) => {
   const { page, limit, offset } = parsePagination(c.req.query());
   const status = c.req.query('status') as OrderStatus | undefined;
   const search = c.req.query('search');
+  const periodParam = c.req.query('period');
+  // Defaults to 'all' so a caller that doesn't ask for a window still sees every
+  // order (the previous behaviour of this endpoint).
+  const period: DashboardPeriod =
+    periodParam === '24h' || periodParam === '7d' || periodParam === '30d' ? periodParam : 'all';
+  // Same window the dashboard uses, so the list and its chart always agree.
+  const { since } = dashboardBuckets(period);
+  const periodFilter = since ? sql`${schema.orders.createdAt} >= ${since}` : undefined;
   const conditions: SQL[] = [];
+  if (periodFilter) conditions.push(periodFilter);
   if (status) conditions.push(eq(schema.orders.status, status));
   if (search) {
     const term = `%${search}%`;
@@ -1019,6 +1162,7 @@ adminApp.get('/orders', async (c) => {
     db
       .select({ status: schema.orders.status, count: sql<number>`count(*)` })
       .from(schema.orders)
+      .where(periodFilter)
       .groupBy(schema.orders.status),
   ]);
   // Attach line items (product name/image) to each order in one batch query
@@ -1038,11 +1182,14 @@ adminApp.get('/orders', async (c) => {
   }
   const data = orders.map((o) => ({ ...o, items: itemsByOrder.get(o.id) ?? [] }));
   const statusCounts: Record<string, number> = {};
-  for (const row of statusRows) statusCounts[row.status] = row.count;
-  const total = countResult?.count ?? 0;
+  for (const row of statusRows) statusCounts[row.status] = toNum(row.count);
+  const total = toNum(countResult?.count);
   return c.json({
     success: true,
-    data,
+    data: data.map((o) => ({
+      ...o,
+      items: o.items.map((item) => ({ ...item, quantity: toNum(item.quantity) })),
+    })),
     meta: { total, page, totalPages: Math.ceil(total / limit), limit, statusCounts },
   });
 });
@@ -1286,17 +1433,19 @@ adminApp.get('/transactions', async (c) => {
     itemsByOrder.set(item.orderId, list);
   }
   const data = rows.map((r) => ({ ...r, items: itemsByOrder.get(r.id) ?? [] }));
+  // Aggregates arrive as strings from the driver — coerce so the client's
+  // `+` accumulation doesn't concatenate digits.
   const paymentStatusCounts: Record<string, number> = {};
-  for (const row of statusRows) paymentStatusCounts[row.paymentStatus] = row.count;
+  for (const row of statusRows) paymentStatusCounts[row.paymentStatus] = toNum(row.count);
   const methodBreakdown = methodRows.map((m) => ({
     method: m.paymentMethod ?? 'unknown',
-    count: m.count,
-    total: m.total,
+    count: toNum(m.count),
+    total: toNum(m.total),
   }));
-  const total = countResult?.count ?? 0;
+  const total = toNum(countResult?.count);
   return c.json({
     success: true,
-    data,
+    data: data.map((t) => ({ ...t, items: t.items.map((i) => ({ ...i, quantity: toNum(i.quantity) })) })),
     meta: {
       total,
       page,
@@ -1304,7 +1453,7 @@ adminApp.get('/transactions', async (c) => {
       limit,
       paymentStatusCounts,
       methodBreakdown,
-      paidRevenue: revenueRow?.total ?? 0,
+      paidRevenue: toNum(revenueRow?.total),
     },
   });
 });
@@ -1940,6 +2089,8 @@ adminApp.put(
     await revalidateStorefront(c, 'checkout-config');
   if ([...PUBLIC_TRACKING_KEYS].some((k) => k in body))
     await revalidateStorefront(c, 'tracking-config');
+  if (['facebook', 'instagram', 'youtube', 'whatsapp'].some((k) => k in body))
+    await revalidateStorefront(c, 'social-config');
   if ('customSnippets' in body) await revalidateStorefront(c, 'custom-snippets');
 
   return c.json({ success: true });
@@ -2121,28 +2272,15 @@ adminApp.get('/newsletter-subscribers', async (c) => {
 });
 
 // ── Hero Slides ──
+// A hero slide is imagery only — the storefront renders no copy over it, so the
+// text/badge/CTA fields are gone. `title` is retained (always sent as '') only
+// because the `hero_slide.title` column is NOT NULL without a default; existing
+// rows keep whatever text they already had, which nothing reads any more.
 const createHeroSlideSchema = z.object({
   title: z.string().max(255).default(''),
-  titleBn: z.string().nullish(),
-  subtitle: z.string().nullish(),
-  subtitleBn: z.string().nullish(),
-  description: z.string().nullish(),
-  descriptionBn: z.string().nullish(),
   image: z.string().max(2000).default(''),
   backgroundImage: z.string().nullish(),
   mobileBackgroundImage: z.string().nullish(),
-  ctaText: z.string().nullish(),
-  ctaTextBn: z.string().nullish(),
-  ctaLink: z.string().nullish(),
-  ctaSecondaryText: z.string().nullish(),
-  ctaSecondaryTextBn: z.string().nullish(),
-  ctaSecondaryLink: z.string().nullish(),
-  overlayColor: z.string().default('from-black/60 to-transparent'),
-  textAlign: z.enum(['left', 'center', 'right']).default('left'),
-  textColor: z.string().default('#ffffff'),
-  badge: z.string().nullish(),
-  badgeBn: z.string().nullish(),
-  badgeVariant: z.enum(['default', 'secondary', 'destructive', 'outline']).default('default'),
   animation: z
     .enum([
       'fade',
@@ -2155,13 +2293,7 @@ const createHeroSlideSchema = z.object({
       'parallax',
     ])
     .default('fade'),
-  animationDuration: z.number().int().min(200).max(3000).default(700),
-  titleFontSize: z.enum(['sm', 'md', 'lg', 'xl']).default('lg'),
-  subtitleFontSize: z.enum(['sm', 'md', 'lg', 'xl']).default('md'),
-  productId: z.string().nullish(),
-  showTrustBadges: z.boolean().default(true),
-  showTitle: z.boolean().default(true),
-  showSubtitle: z.boolean().default(true),
+  animationDuration: z.number().int().min(200).max(3000).default(900),
   sortOrder: z.number().int().min(0).default(0),
   isActive: z.boolean().default(true),
 });
@@ -2197,34 +2329,11 @@ adminApp.post('/hero-slides', zValidator('json', createHeroSlideSchema), async (
     .values({
       id: crypto.randomUUID(),
       title: body.title,
-      titleBn: body.titleBn ?? null,
-      subtitle: body.subtitle ?? null,
-      subtitleBn: body.subtitleBn ?? null,
-      description: body.description ?? null,
-      descriptionBn: body.descriptionBn ?? null,
       image: body.image,
       backgroundImage: body.backgroundImage ?? null,
       mobileBackgroundImage: body.mobileBackgroundImage ?? null,
-      ctaText: body.ctaText ?? null,
-      ctaTextBn: body.ctaTextBn ?? null,
-      ctaLink: body.ctaLink ?? null,
-      ctaSecondaryText: body.ctaSecondaryText ?? null,
-      ctaSecondaryTextBn: body.ctaSecondaryTextBn ?? null,
-      ctaSecondaryLink: body.ctaSecondaryLink ?? null,
-      overlayColor: body.overlayColor,
-      textAlign: body.textAlign,
-      textColor: body.textColor,
-      badge: body.badge ?? null,
-      badgeBn: body.badgeBn ?? null,
-      badgeVariant: body.badgeVariant,
       animation: body.animation,
-      animationDuration: body.animationDuration ?? 700,
-      titleFontSize: body.titleFontSize,
-      subtitleFontSize: body.subtitleFontSize,
-      productId: body.productId ?? null,
-      showTrustBadges: body.showTrustBadges,
-      showTitle: body.showTitle,
-      showSubtitle: body.showSubtitle,
+      animationDuration: body.animationDuration ?? 900,
       sortOrder: body.sortOrder,
       isActive: body.isActive,
       createdAt: now,

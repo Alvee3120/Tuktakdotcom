@@ -177,6 +177,22 @@ export function createApp() {
     return c.json({ success: true, data: config });
   });
 
+  // Public social-profile links (admin Settings → Social tab). Only these
+  // non-secret profile URLs are exposed; they power the storefront footer.
+  const SOCIAL_CONFIG_KEYS = ['facebook', 'instagram', 'youtube', 'whatsapp'] as const;
+  app.get('/api/social-config', async (c) => {
+    const db = createDb();
+    const rows = await db
+      .select()
+      .from(settings)
+      .where(inArray(settings.key, [...SOCIAL_CONFIG_KEYS]));
+    const config: Record<string, string> = {};
+    for (const row of rows) config[row.key] = row.value;
+    // No CDN caching — admin saves reflect on the storefront immediately.
+    c.header('Cache-Control', 'public, max-age=0, stale-while-revalidate=0, must-revalidate');
+    return c.json({ success: true, data: config });
+  });
+
   // Public tracking config — ONLY whitelisted, non-secret keys are exposed.
   // The CAPI access token stays server-side (see lib/meta-capi.ts).
   app.get('/api/tracking-config', async (c) => {

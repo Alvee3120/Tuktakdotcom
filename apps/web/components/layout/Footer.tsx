@@ -4,23 +4,30 @@ import { getTranslations } from 'next-intl/server';
 import { Logo } from '@/components/shared/Logo';
 import { SocialIcon } from '@/components/shared/SocialIcon';
 import { NewsletterForm } from '@/components/store/NewsletterForm';
-import { SOCIAL_PLATFORMS } from '@/lib/menu-config';
+import { getSocialLinks } from '@/lib/social-links';
 import { cn } from '@/lib/utils';
 
 import type { MenuConfig } from '@/lib/menu-config';
+import type { CSSProperties } from 'react';
 
 type FooterProps = {
   logoLight?: string;
   logoDark?: string;
   menuConfig?: MenuConfig;
+  locale?: string;
   className?: string;
 };
 
-export async function Footer({ logoLight, logoDark, menuConfig, className }: FooterProps) {
+export async function Footer({ logoLight, logoDark, menuConfig, locale, className }: FooterProps) {
   const t = await getTranslations('footer');
   const columns = menuConfig?.footerMenu ?? [];
-  const socials = menuConfig?.footerSocial ?? [];
   const payments = menuConfig?.footerPayments ?? [];
+  const socialLinks = await getSocialLinks();
+
+  // Admin-set footer tagline; falls back to the built-in translated copy.
+  const tagline =
+    (locale === 'bn' ? menuConfig?.footerTaglineBn : menuConfig?.footerTagline) ||
+    t('newsletterDesc');
 
   return (
     <footer
@@ -33,38 +40,13 @@ export async function Footer({ logoLight, logoDark, menuConfig, className }: Foo
 
       <div className="relative mx-auto max-w-screen-2xl px-4 pb-8 pt-12 sm:px-6 lg:px-8">
         {/* ── Desktop: 4-col / Mobile: 2-col ── */}
-        <div className="grid grid-cols-2 gap-x-6 gap-y-8 text-center sm:text-left lg:grid-cols-[1.2fr_1fr_1fr_1.4fr] lg:gap-8 lg:text-left">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-8 text-left lg:grid-cols-[1.2fr_1fr_1fr_1.4fr] lg:gap-8">
           {/* Col 1 — Brand */}
-          <div className="col-span-2 flex flex-col items-center sm:col-span-2 sm:items-center lg:col-span-1 lg:items-start">
+          <div className="col-span-2 flex flex-col items-start sm:col-span-2 lg:col-span-1">
             <Logo size="sm" lightSrc={logoLight} darkSrc={logoDark} />
             <p className="mt-4 max-w-[220px] text-sm leading-relaxed text-emerald-700/60 dark:text-white/50">
-              {t('newsletterDesc')}
+              {tagline}
             </p>
-            {socials.length > 0 && (
-              <div className="mt-5">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-emerald-900/80 dark:text-white/80">
-                  {t('followUs')}
-                </h3>
-                <div className="mt-3 flex items-center gap-2">
-                  {socials.map((s) => {
-                    const platform = SOCIAL_PLATFORMS.find((p) => p.id === s.platform);
-                    if (!platform || !s.url) return null;
-                    return (
-                      <a
-                        key={s.platform}
-                        href={s.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title={platform.label}
-                        className="flex h-9 w-9 items-center justify-center rounded-full border border-emerald-200/50 bg-white/60 text-emerald-700 shadow-sm backdrop-blur-md transition-all duration-200 hover:border-emerald-400/60 hover:bg-emerald-50 hover:text-emerald-800 dark:border-white/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/20"
-                      >
-                        <SocialIcon platform={s.platform} className="h-3.5 w-3.5" />
-                      </a>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Col 2–N — Dynamic link columns */}
@@ -93,6 +75,28 @@ export async function Footer({ logoLight, logoDark, menuConfig, className }: Foo
 
           {/* Last col — Newsletter */}
           <div className="col-span-2 sm:col-span-2 lg:col-span-1">
+            {socialLinks.length > 0 && (
+              <div
+                role="group"
+                aria-label={t('followUs')}
+                className="mb-5 flex flex-wrap items-center gap-2.5"
+              >
+                {socialLinks.map((social) => (
+                  <a
+                    key={social.platform}
+                    href={social.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={social.label}
+                    title={social.label}
+                    style={{ '--brand': social.color } as CSSProperties}
+                    className="flex h-9 w-9 items-center justify-center rounded-full border border-emerald-200/70 bg-white/60 text-emerald-700/80 backdrop-blur-sm transition-colors duration-200 hover:border-transparent hover:bg-[var(--brand)] hover:text-white dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:text-white"
+                  >
+                    <SocialIcon platform={social.platform} className="h-4 w-4" />
+                  </a>
+                ))}
+              </div>
+            )}
             <h3 className="text-xs font-semibold uppercase tracking-wider text-emerald-900/80 dark:text-white/80">
               {t('newsletter') ?? 'Stay Updated'}
             </h3>
@@ -106,13 +110,13 @@ export async function Footer({ logoLight, logoDark, menuConfig, className }: Foo
         <div className="my-8 h-px bg-gradient-to-r from-transparent via-emerald-200/60 to-transparent dark:via-white/10" />
 
         {/* ── Bottom Bar ── */}
-        <div className="flex flex-col items-center justify-between gap-4 sm:flex-row">
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
           <span className="text-xs text-emerald-700/50 dark:text-white/50">
             &copy; {new Date().getFullYear()} {t('allRightsReserved')}
           </span>
 
           {payments.length > 0 && (
-            <div className="flex flex-wrap items-center justify-center gap-2.5 sm:justify-end">
+            <div className="flex flex-wrap items-center justify-start gap-2.5 sm:justify-end">
               {payments.map((pm) => (
                 <div key={pm.id} className="flex items-center">
                   {pm.image ? (
