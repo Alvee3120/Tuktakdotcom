@@ -82,14 +82,14 @@ Then, in **Terminal**:
 
 ```bash
 cd ~/app/apps/api
-npm install --include=dev          # include=dev so drizzle-kit is present
+npm install --include=dev --legacy-peer-deps          # include=dev so drizzle-kit is present
 npx drizzle-kit push --force       # creates the schema from src/db/schema.ts
 ```
 
 Back in cPanel → **Restart** the application. Check
 `https://api.tuktakdot.com/health` → `{"status":"ok",...}`.
 
-> `npm install --include=dev` is required: the app's `NODE_ENV=production`
+> `npm install --include=dev --legacy-peer-deps` is required: the app's `NODE_ENV=production`
 > otherwise makes npm skip devDependencies (`drizzle-kit`).
 
 > **Use `push`, not `migrate`.** The SQL files in `drizzle/migrations/` are
@@ -123,7 +123,7 @@ Then, in **Terminal**:
 
 ```bash
 cd ~/app/apps/web
-npm install --include=dev
+npm install --include=dev --legacy-peer-deps
 NEXT_PUBLIC_API_URL=https://api.tuktakdot.com \
 NEXT_PUBLIC_APP_URL=https://tuktakdot.com \
 npm run build
@@ -140,8 +140,8 @@ cPanel → **SSL/TLS Status** → select `tuktakdot.com` and `api.tuktakdot.com`
 
 ```bash
 cd ~/app && git pull
-cd apps/api && npm install --include=dev && npx drizzle-kit push --force
-cd ../web && npm install --include=dev && npm run build
+cd apps/api && npm install --include=dev --legacy-peer-deps && npx drizzle-kit push --force
+cd ../web && npm install --include=dev --legacy-peer-deps && npm run build
 ```
 
 Then **Restart** both apps in cPanel.
@@ -158,6 +158,9 @@ Then **Restart** both apps in cPanel.
   without Cloudflare the images serve as-is (harmless).
 - **Uploads disappearing** — `UPLOAD_DIR` must point to a persistent absolute
   path, and `GET /api/images/*` serves from it.
+- **`npm install` fails with `ERESOLVE could not resolve`** — the repo is a pnpm
+  workspace and npm is stricter about a dev-only eslint peer range. Add
+  `--legacy-peer-deps` (runtime is unaffected).
 - **`drizzle-kit migrate` fails with `syntax error at or near "`"`** — expected;
   the checked-in migrations are MySQL/SQLite. Use `npx drizzle-kit push --force`
   (see §2).
