@@ -124,10 +124,18 @@ Then, in **Terminal**:
 ```bash
 cd ~/app/apps/web
 npm install --include=dev --legacy-peer-deps
+RAYON_NUM_THREADS=1 \
 NEXT_PUBLIC_API_URL=https://api.tuktakdot.com \
 NEXT_PUBLIC_APP_URL=https://tuktakdot.com \
-npm run build
+npm run build:webpack
 ```
+
+> **Why webpack + RAYON_NUM_THREADS?** CloudLinux's Node selector forces
+> `node_modules` to be a symlink to the virtualenv, and Turbopack refuses to
+> build through a symlink. Webpack resolves it fine. `RAYON_NUM_THREADS=1`
+> stops Next's Rust tooling from opening a thread pool, which panics on hosts
+> that cap threads; `experimental.cpus: 1` in `next.config.ts` keeps the build
+> within the account's memory limit.
 
 Back in cPanel → **Restart** the application. Visit `https://tuktakdot.com`.
 
@@ -141,7 +149,7 @@ cPanel → **SSL/TLS Status** → select `tuktakdot.com` and `api.tuktakdot.com`
 ```bash
 cd ~/app && git pull
 cd apps/api && npm install --include=dev --legacy-peer-deps && npx drizzle-kit push --force
-cd ../web && npm install --include=dev --legacy-peer-deps && npm run build
+cd ../web && npm install --include=dev --legacy-peer-deps && npm run build:webpack
 ```
 
 Then **Restart** both apps in cPanel.
