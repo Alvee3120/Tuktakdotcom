@@ -14,6 +14,9 @@ const nextConfig: NextConfig = {
     loader: 'custom',
     loaderFile: './cf-image-loader.ts',
     formats: ['image/avif', 'image/webp'],
+    // Must list every value passed to <Image quality={...}>; Next warns (and
+    // refuses to optimize) for qualities missing from this list.
+    qualities: [75, 88, 90, 92],
     deviceSizes: [640, 750, 828, 1080, 1200, 1920],
     imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
     remotePatterns: [
