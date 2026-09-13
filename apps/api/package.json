@@ -7,6 +7,7 @@
     "dev": "tsx watch --env-file=.env src/index.ts",
     "build": "tsc --noEmit",
     "start": "tsx src/index.ts",
+    "create-admin": "tsx --env-file-if-exists=.env src/scripts/create-admin.ts",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",

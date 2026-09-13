@@ -64,6 +64,19 @@ DATABASE_URL=postgres://… pnpm --filter api db:push
 `drizzle-kit` is a dev dependency, so run this from a build/CI step (or a dev
 machine), not from a production-only install.
 
+### Creating an admin
+
+The seed data creates user rows **without passwords**, so they cannot log in.
+Create (or promote) an admin instead:
+
+```bash
+pnpm --filter api create-admin -- you@example.com "a-strong-password" "Your Name"
+```
+
+If the email already exists it is promoted to `admin`; otherwise a credential
+account is created through better-auth's sign-up path (so the password hash
+format is correct).
+
 ## Hosting
 
 ### API (Node + PostgreSQL)

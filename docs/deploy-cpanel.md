@@ -97,6 +97,20 @@ Back in cPanel → **Restart** the application. Check
 > derives the schema directly from `src/db/schema.ts` and was verified to
 > produce the same 29 tables as the working dev database.
 
+**Create an admin user** (there are no logins until you do this):
+
+```bash
+cd ~/app/apps/api
+npm run create-admin -- you@example.com "a-strong-password" "Your Name"
+```
+
+If the email already exists it is promoted to admin. Alternatively, register on
+the site and promote the row directly:
+
+```bash
+psql 'postgres://…' -c "update \"user\" set role='admin' where email='you@example.com';"
+```
+
 ## 3. Web — Setup Node.js App
 
 > **⚠ Often not possible on shared hosting.** CloudLinux LVE caps the account's
