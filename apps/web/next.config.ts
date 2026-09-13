@@ -10,7 +10,10 @@ const nextConfig: NextConfig = {
   // account's memory cap. Pin the worker count so `next build` fits.
   experimental: {
     cpus: 1,
-    memoryBasedWorkersCount: true,
+    // Run webpack in a worker and shrink its heap — needed to fit `next build`
+    // inside a shared-host memory cap.
+    webpackBuildWorker: true,
+    webpackMemoryOptimizations: true,
   },
   // Cloudflare Image Resizing via custom loader.
   // <Image> components generate srcset with multiple widths.
