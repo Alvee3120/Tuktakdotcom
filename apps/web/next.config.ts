@@ -5,16 +5,6 @@ import type { NextConfig } from 'next';
 const withNextIntl = createNextIntlPlugin('./i18n.ts');
 
 const nextConfig: NextConfig = {
-  // Shared/cPanel hosts can report a high CPU count (e.g. nproc = 32), which
-  // makes Next spawn dozens of build workers and get OOM-killed under the
-  // account's memory cap. Pin the worker count so `next build` fits.
-  experimental: {
-    cpus: 1,
-    // Run webpack in a worker and shrink its heap — needed to fit `next build`
-    // inside a shared-host memory cap.
-    webpackBuildWorker: true,
-    webpackMemoryOptimizations: true,
-  },
   // Cloudflare Image Resizing via custom loader.
   // <Image> components generate srcset with multiple widths.
   // Cloudflare CDN resizes on-the-fly at the edge, converts to WebP/AVIF

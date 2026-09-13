@@ -99,6 +99,15 @@ Back in cPanel → **Restart** the application. Check
 
 ## 3. Web — Setup Node.js App
 
+> **⚠ Often not possible on shared hosting.** CloudLinux LVE caps the account's
+> memory and its process/thread count. Next 16's production build needs more
+> than a typical shared plan allows, and fails with `Killed` (memory) or
+> `OS can't spawn worker thread … Resource temporarily unavailable` (threads),
+> even with `experimental.cpus: 1` and `RAYON_NUM_THREADS=1`. When that happens,
+> host the web app on Vercel instead (root directory `apps/web`, with the env
+> vars below) and keep the API + Postgres on cPanel. The steps below only work
+> on more generous plans.
+
 cPanel → **Setup Node.js App** → **Create Application**:
 
 | Field | Value |
